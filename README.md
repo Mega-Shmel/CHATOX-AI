@@ -1,4 +1,5 @@
 # ⚡ CHATOX AI
+# MADE BY AI
 
 ![CHATOX AI Banner](banner.png)
 
