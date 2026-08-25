@@ -18,6 +18,7 @@ import {
   hashPassword,
 } from './utils/crypto';
 import { createSpeechRecognizer } from './utils/speech';
+import { sendChatMessageStream, discoverProviderModels, discoverLocalPort } from './services/apiService';
 
 // Components
 import { WelcomeModal } from './components/WelcomeModal';
@@ -486,26 +487,18 @@ export default function App() {
       };
 
       for (const provider of activeProviders) {
-        const res = await fetch('/api/models/discover', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            provider,
-            apiKey: settings.apiKeys[provider],
-          }),
-        });
+        const result = await discoverProviderModels(provider, settings.apiKeys[provider]);
 
-        const data = await res.json();
-        if (data.success) {
-          addLog('info', 'Discover', `[${provider.toUpperCase()}] Проверка успешна: ${data.status}`);
-          if (Array.isArray(data.models)) {
-            newDiscoveredMap[provider] = data.models.map((m: any) => ({
+        if (result.success) {
+          addLog('info', 'Discover', `[${provider.toUpperCase()}] Проверка успешна: ${result.status}`);
+          if (Array.isArray(result.models) && result.models.length > 0) {
+            newDiscoveredMap[provider] = result.models.map((m: any) => ({
               id: typeof m === 'string' ? m : m.id,
               name: typeof m === 'string' ? m : m.name || m.id,
             }));
           }
         } else {
-          addLog('warn', 'Discover', `[${provider.toUpperCase()}] Ошибка: ${data.error}`);
+          addLog('warn', 'Discover', `[${provider.toUpperCase()}] Ошибка: ${result.error || result.status}`);
         }
       }
 
@@ -607,119 +600,94 @@ export default function App() {
       .slice(0, -1)
       .slice(-settings.maxMessagesInContext);
 
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          modelId: activeModel.id,
-          provider: activeModel.provider,
-          messages: contextSlice,
-          systemPrompt: settings.systemPrompt,
-          modelConfig: settings.modelConfigs?.[activeModel.id],
-          localPortConfig: settings.localPortConfig,
-          apiKeys: settings.apiKeys,
-          attachments: userMessage.attachments,
-        }),
-      });
+    let accumulatedText = '';
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData?.error || `HTTP ${response.status}: ${response.statusText}`);
-      }
+    await sendChatMessageStream({
+      modelId: activeModel.id,
+      provider: activeModel.provider,
+      messages: contextSlice,
+      systemPrompt: settings.systemPrompt,
+      modelConfig: settings.modelConfigs?.[activeModel.id],
+      localPortConfig: settings.localPortConfig,
+      apiKeys: settings.apiKeys,
+      attachments: userMessage.attachments,
+      onChunk: (chunk: string) => {
+        accumulatedText += chunk;
+        setChats((prev) =>
+          prev.map((c) => {
+            if (c.id !== chatId) return c;
+            return {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === assistantPlaceholderId
+                  ? {
+                      ...m,
+                      content: accumulatedText,
+                      status: 'streaming' as const,
+                    }
+                  : m
+              ),
+            };
+          })
+        );
+      },
+      onError: (errMsg: string) => {
+        addLog('error', 'Chat', `Ошибка генерации: ${errMsg}`);
+        setChats((prev) => {
+          const errorUpdated = prev.map((c) => {
+            if (c.id !== chatId) return c;
+            return {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === assistantPlaceholderId
+                  ? {
+                      ...m,
+                      content: accumulatedText ? `${accumulatedText}\n\n⚠️ **${errMsg}**` : `⚠️ **Ошибка генерации:**\n\n${errMsg}`,
+                      status: 'error' as const,
+                    }
+                  : m
+              ),
+            };
+          });
+          saveChatsToStorage(errorUpdated);
+          return errorUpdated;
+        });
+      },
+      onDone: () => {
+        setIsLoading(false);
+        setChats((prev) => {
+          const doneUpdated = prev.map((c) => {
+            if (c.id !== chatId) return c;
+            return {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === assistantPlaceholderId
+                  ? {
+                      ...m,
+                      status: 'complete' as const,
+                    }
+                  : m
+              ),
+            };
+          });
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let accumulatedText = '';
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const parsed = JSON.parse(line.substring(6));
-                if (parsed.error) {
-                  accumulatedText += `\n\n⚠️ ${parsed.error}`;
-                } else if (parsed.text) {
-                  accumulatedText += parsed.text;
-                }
-
-                // Update assistant content in real-time
-                setChats((prev) =>
-                  prev.map((c) => {
-                    if (c.id !== chatId) return c;
-                    return {
-                      ...c,
-                      messages: c.messages.map((m) =>
-                        m.id === assistantPlaceholderId
-                          ? {
-                              ...m,
-                              content: accumulatedText,
-                              status: parsed.done ? ('complete' as const) : ('streaming' as const),
-                            }
-                          : m
-                      ),
-                    };
-                  })
-                );
-              } catch (e) {
-                // Ignore SSE heartbeat or incomplete lines
-              }
-            }
+          if (isFirstUserMessage && trimmed) {
+            const titleSnippet = trimmed.slice(0, 30) + (trimmed.length > 30 ? '...' : '');
+            const finalWithTitle = doneUpdated.map((c) =>
+              c.id === chatId ? { ...c, title: titleSnippet } : c
+            );
+            saveChatsToStorage(finalWithTitle);
+            return finalWithTitle;
           }
-        }
-      }
 
-      // Auto-title the chat from the first message
-      if (isFirstUserMessage && trimmed) {
-        const titleSnippet = trimmed.slice(0, 30) + (trimmed.length > 30 ? '...' : '');
-        setChats((prev) => {
-          const updatedWithTitle = prev.map((c) =>
-            c.id === chatId ? { ...c, title: titleSnippet } : c
-          );
-          saveChatsToStorage(updatedWithTitle);
-          return updatedWithTitle;
+          saveChatsToStorage(doneUpdated);
+          return doneUpdated;
         });
-      } else {
-        setChats((prev) => {
-          saveChatsToStorage(prev);
-          return prev;
-        });
-      }
+        addLog('info', 'Chat', `Ответ от [${activeModel.name}] успешно получен`);
+      },
+    });
 
-      addLog('info', 'Chat', `Ответ от [${activeModel.name}] успешно получен`);
-    } catch (error: any) {
-      const errorMsg = error?.message || 'Не удалось получить ответ от сервера';
-      addLog('error', 'Chat', `Ошибка генерации: ${errorMsg}`);
-
-      setChats((prev) => {
-        const errorUpdated = prev.map((c) => {
-          if (c.id !== chatId) return c;
-          return {
-            ...c,
-            messages: c.messages.map((m) =>
-              m.id === assistantPlaceholderId
-                ? {
-                    ...m,
-                    content: `⚠️ **Ошибка генерации ответа:**\n\n${errorMsg}`,
-                    status: 'error' as const,
-                  }
-                : m
-            ),
-          };
-        });
-        saveChatsToStorage(errorUpdated);
-        return errorUpdated;
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    setIsLoading(false);
   };
 
   // Delete chat

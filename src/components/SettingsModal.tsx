@@ -35,6 +35,7 @@ import {
   ModelOption,
   CustomModelItem,
   LocalPortConfig,
+  DiscoveredModel,
 } from '../types';
 import {
   PROVIDERS_LIST,
@@ -43,6 +44,7 @@ import {
   PRESET_FONTS,
 } from '../data/defaultModels';
 import { getContrastColor, isLightColor } from '../utils/color';
+import { discoverLocalPort, discoverProviderModels } from '../services/apiService';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -83,7 +85,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [customAccentHex, setCustomAccentHex] = useState(settings.customization.accentColor);
   const [isDiscoveringPort, setIsDiscoveringPort] = useState(false);
   const [portStatus, setPortStatus] = useState<string | null>(null);
+  const [testingProviderKey, setTestingProviderKey] = useState<ProviderId | null>(null);
+  const [providerTestResults, setProviderTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
   const fontInputRef = useRef<HTMLInputElement>(null);
+
+  const handleTestSingleKey = async (providerId: ProviderId) => {
+    const key = settings.apiKeys[providerId] || '';
+    setTestingProviderKey(providerId);
+    setProviderTestResults((prev) => ({
+      ...prev,
+      [providerId]: { success: false, message: 'Проверка ключа...' },
+    }));
+
+    try {
+      const res = await discoverProviderModels(providerId, key);
+      setProviderTestResults((prev) => ({
+        ...prev,
+        [providerId]: {
+          success: res.success,
+          message: res.success ? (res.status || 'Ключ активен и работает!') : (res.error || 'Ошибка проверки'),
+        },
+      }));
+      if (res.success && res.models && res.models.length > 0) {
+        const newDiscoveredMap: Record<string, DiscoveredModel[]> = {
+          ...(settings.discoveredModels || {}),
+          [providerId]: res.models,
+        };
+        onUpdateSettings({ discoveredModels: newDiscoveredMap });
+      }
+    } catch (e: any) {
+      setProviderTestResults((prev) => ({
+        ...prev,
+        [providerId]: { success: false, message: e?.message || 'Ошибка подключения' },
+      }));
+    } finally {
+      setTestingProviderKey(null);
+    }
+  };
 
   useEffect(() => {
     if (shakeTab2) {
@@ -131,38 +169,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleDiscoverPortModels = async () => {
-    const portCfg = settings.localPortConfig || {
+    const portCfg: LocalPortConfig = settings.localPortConfig || {
       enabled: true,
       host: '127.0.0.1',
       port: 11434,
       serverType: 'ollama',
+      discoveredModels: [],
     };
 
     setIsDiscoveringPort(true);
     setPortStatus('Подключение к локальному серверу...');
 
     try {
-      const res = await fetch('/api/models/local-discover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          host: portCfg.host || '127.0.0.1',
-          port: portCfg.port || 11434,
-          serverType: portCfg.serverType || 'ollama',
-        }),
-      });
-
-      const data = await res.json();
+      const data = await discoverLocalPort(portCfg);
       if (data.success && Array.isArray(data.models)) {
         setPortStatus(data.status || `Найдено ${data.models.length} моделей`);
-        const newDiscovered = data.models.map((m: string) => ({
-          id: `local/${m}`,
-          name: m,
-        }));
         onUpdateSettings({
           localPortConfig: {
             ...portCfg,
-            discoveredModels: newDiscovered,
+            discoveredModels: data.models,
           },
         });
       } else {
@@ -943,37 +968,85 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 {provider.badge}
                               </span>
                             </div>
-                            {provider.id === 'google' && (
-                              <span className="text-[11px] text-emerald-400 flex items-center gap-1">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Встроенный ключ сервера</span>
-                              </span>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {currentKey ? (
+                                <span className="text-[11px] text-emerald-400 flex items-center gap-1">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Ключ указан</span>
+                                </span>
+                              ) : provider.id === 'google' ? (
+                                <span className="text-[10px] text-amber-400/80">
+                                  Бесплатный ключ на aistudio.google.com
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-neutral-500">
+                                  Ключ не введен
+                                </span>
+                              )}
+                            </div>
                           </div>
 
-                          {/* API key input */}
-                          <div className="relative">
-                            <input
-                              type={isKeyVisible ? 'text' : 'password'}
-                              value={currentKey}
-                              onChange={(e) => handleApiKeyChange(provider.id, e.target.value)}
-                              placeholder={`Введите API ключ для ${
-                                settings.customization.useSimpleNames
-                                  ? provider.simpleName
-                                  : provider.name
-                              }...`}
-                              className="w-full px-3.5 py-2.5 pr-10 bg-black/60 border rounded-xl text-white font-mono text-xs focus:outline-none transition-colors"
-                              style={{ borderColor: currentKey ? `${accentColor}60` : 'rgba(255, 255, 255, 0.1)' }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setVisibleKeyProvider(isKeyVisible ? null : provider.id)
-                              }
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
+                          {/* API key input + Test button */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2">
+                              <div className="relative flex-1">
+                                <input
+                                  type={isKeyVisible ? 'text' : 'password'}
+                                  value={currentKey}
+                                  onChange={(e) => handleApiKeyChange(provider.id, e.target.value)}
+                                  placeholder={`Введите API ключ для ${
+                                    settings.customization.useSimpleNames
+                                      ? provider.simpleName
+                                      : provider.name
+                                  }...`}
+                                  className="w-full px-3.5 py-2.5 pr-10 bg-black/60 border rounded-xl text-white font-mono text-xs focus:outline-none transition-colors"
+                                  style={{ borderColor: currentKey ? `${accentColor}60` : 'rgba(255, 255, 255, 0.1)' }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setVisibleKeyProvider(isKeyVisible ? null : provider.id)
+                                  }
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleTestSingleKey(provider.id)}
+                                disabled={testingProviderKey === provider.id || (!currentKey && provider.id !== 'google')}
+                                className="px-3 py-2.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all disabled:opacity-40 shrink-0"
+                                style={{
+                                  backgroundColor: `${accentColor}20`,
+                                  borderColor: `${accentColor}50`,
+                                  color: isLightColor(accentColor) ? '#ffffff' : accentColor,
+                                }}
+                                title="Проверить работоспособность ключа"
+                              >
+                                <RefreshCw className={`w-3.5 h-3.5 ${testingProviderKey === provider.id ? 'animate-spin' : ''}`} />
+                                <span className="hidden sm:inline">Проверить</span>
+                              </button>
+                            </div>
+
+                            {/* Test Status feedback */}
+                            {providerTestResults[provider.id] && (
+                              <div
+                                className={`text-[11px] px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${
+                                  providerTestResults[provider.id].success
+                                    ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/30'
+                                    : 'bg-rose-950/40 text-rose-300 border-rose-500/30'
+                                }`}
+                              >
+                                {providerTestResults[provider.id].success ? (
+                                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                                ) : (
+                                  <Info className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                                )}
+                                <span>{providerTestResults[provider.id].message}</span>
+                              </div>
+                            )}
                           </div>
 
                           {/* Built-in default model list */}
