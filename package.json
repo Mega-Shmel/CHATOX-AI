@@ -1,5 +1,7 @@
 {
-  "name": "react-example",
+  "name": "chatox-ai",
+  "description": "CHATOX AI - Universal AI Assistant and Chat Platform",
+  "author": "CHATOX AI Team",
   "private": true,
   "version": "0.7.0",
   "type": "module",
@@ -12,7 +14,7 @@
     "lint": "tsc --noEmit",
     "build:app": "vite build",
     "electron:dev": "vite build && electron electron/main.cjs",
-    "build:win": "npm run build && node scripts/generate-ico.js && electron-builder --win",
+    "build:win": "npm run build && electron-builder --win",
     "cap:sync": "vite build && cap sync",
     "cap:android": "vite build && cap sync android && cap open android"
   },
@@ -32,16 +34,12 @@
       "output": "release"
     },
     "win": {
-      "icon": "assets/icon.png",
       "target": [
         "nsis",
         "portable"
       ]
     },
     "nsis": {
-      "installerIcon": "assets/setup-icon.ico",
-      "uninstallerIcon": "assets/setup-icon.ico",
-      "installerHeaderIcon": "assets/icon.png",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
