@@ -10,9 +10,9 @@
 
 Перейдите во вкладку [**Releases**](https://github.com/Mega-Shmel/CHATOX-AI/releases) для загрузки актуальной версии:
 
-- 📱 **Android (.apk)**: `app-debug.apk` / `CHATOX-AI-v0.7.0.apk`
-- 💻 **Windows Installer (.exe)**: `CHATOX AI Setup 0.7.0.exe`
-- 💻 **Windows Portable (.exe)**: `CHATOX AI 0.7.0 Portable.exe`
+- 📱 **Android (.apk)**: `app-debug.apk` / `CHATOX-AI-v*.*.*.apk`
+- 💻 **Windows Installer (.exe)**: `CHATOX AI Setup *.*.*.exe`
+- 💻 **Windows Portable (.exe)**: `CHATOX AI *.*.* Portable.exe`
 
 ---
 
