@@ -1,0 +1,44 @@
+name: Build Windows App (.exe)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js 22
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      run: npm install --legacy-peer-deps
+
+    - name: Build Web App & Backend
+      run: npm run build
+
+    - name: Prepare Icons
+      run: node scripts/generate-ico.js
+
+    - name: Build Windows Executable (.exe)
+      run: npx electron-builder --win --x64
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload Windows Binaries (.exe / installer)
+      uses: actions/upload-artifact@v4
+      with:
+        name: CHATOX-AI-Windows-x64
+        path: |
+          release/*.exe
+          release/*.blockmap
+        if-no-files-found: error

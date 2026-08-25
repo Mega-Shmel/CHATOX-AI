@@ -27,6 +27,9 @@ npm run build:win
 - **`CHATOX AI Setup 0.7.0.exe`** — установщик с вашим значком Setup.
 - **`CHATOX AI 0.7.0 Portable.exe`** — портативная версия.
 
+### Автоматическая сборка Windows через GitHub Actions
+Также сборка Windows .exe происходит автоматически на серверах GitHub (файл `.github/workflows/build-windows.yml`). Вы можете скачать готовые `.exe` файлы прямо из вкладки **Actions** (артефакт `CHATOX-AI-Windows-x64`).
+
 ---
 
 ## 📱 Часть 2. Сборка для Android (.apk v0.7.0)
