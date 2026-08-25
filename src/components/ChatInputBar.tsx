@@ -72,6 +72,11 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   }, [isModelPickerOpen]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // If the user is currently using an IME (Input Method Editor) to switch layout or compose characters, do not intercept
+    if (e.nativeEvent.isComposing || e.keyCode === 229) {
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       onSendMessage();
