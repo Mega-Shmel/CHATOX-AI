@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CHATOX AI</string>
+    <string name="title_activity_main">CHATOX AI</string>
+    <string name="package_name">com.chatox.ai</string>
+    <string name="custom_url_scheme">com.chatox.ai</string>
+</resources>

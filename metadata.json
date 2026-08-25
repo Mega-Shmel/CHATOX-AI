@@ -1,0 +1,6 @@
+{
+  "name": "CHATOX AI",
+  "description": "Универсальный клиент-интерфейс для работы с ИИ-моделями (Gemini, OpenAI, Claude, Mistral, Groq, DeepSeek и др.) с неоновым дизайном, сквозным шифрованием и кастомизацией.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
