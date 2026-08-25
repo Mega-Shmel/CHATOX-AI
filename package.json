@@ -14,7 +14,7 @@
     "lint": "tsc --noEmit",
     "build:app": "vite build",
     "electron:dev": "vite build && electron electron/main.cjs",
-    "build:win": "npm run build && electron-builder --win",
+    "build:win": "npm run build && node scripts/generate-ico.js && electron-builder --win",
     "cap:sync": "vite build && cap sync",
     "cap:android": "vite build && cap sync android && cap open android"
   },
@@ -34,12 +34,15 @@
       "output": "release"
     },
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         "nsis",
         "portable"
       ]
     },
     "nsis": {
+      "installerIcon": "assets/setup-icon.ico",
+      "uninstallerIcon": "assets/setup-icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }

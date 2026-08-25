@@ -389,6 +389,11 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
           value={inputText}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          inputMode="text"
+          autoCapitalize="sentences"
+          autoCorrect="on"
+          spellCheck={true}
+          lang="ru"
           placeholder="Введите сообщение для нейросети..."
           className="flex-1 bg-transparent text-white placeholder-neutral-500 text-sm md:text-base px-2 py-2 resize-none max-h-32 focus:outline-none scrollbar-thin"
         />

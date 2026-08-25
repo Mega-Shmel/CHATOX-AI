@@ -1,20 +1,44 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# ⚡ CHATOX AI
 
-# Run and deploy your AI Studio app
+![CHATOX AI Banner](banner.png)
 
-This contains everything you need to run your app locally.
+> **CHATOX AI** — Универсальный, приватный и стильный ИИ-клиент для Android и Windows (ПК) с поддержкой всех популярных нейросетей, локальных портов Ollama/LM Studio и сквозного шифрования.
 
-View your app in AI Studio: https://ai.studio/apps/a3fe5c0e-0ec4-4334-a77a-370538862cc4
+---
 
-## Run Locally
+## 📥 Скачать приложение (Релизы)
 
-**Prerequisites:**  Node.js
+Перейдите во вкладку [**Releases**](https://github.com/Mega-Shmel/CHATOX-AI/releases) для загрузки актуальной версии:
 
+- 📱 **Android (.apk)**: `app-debug.apk` / `CHATOX-AI-v0.7.0.apk`
+- 💻 **Windows Installer (.exe)**: `CHATOX AI Setup 0.7.0.exe`
+- 💻 **Windows Portable (.exe)**: `CHATOX AI 0.7.0 Portable.exe`
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+---
+
+## 🌟 Основные возможности
+
+- 🤖 **Все передовые модели**: Gemini 2.5/Flash, GPT-4o, Claude 3.5, Grok 3, DeepSeek R1/V3, Llama 3.3, Mistral, Qwen 2.5 и другие.
+- 🔌 **Локальный ИИ без интернета**: Подключение к Ollama, LM Studio, vLLM по локальным портам (`11434`, `1234`, `8000`).
+- 🔒 **Максимальная приватность**: Сквозное шифрование AES-256-GCM, защита данных при переносе устройства и локальное хранение.
+- 🎨 **Киберпанк & Неоновый стиль**: Выбор тем, кастомных цветов акцента, системных промптов и индивидуальных настроек каждой модели (⚙️).
+- 🎙️ **Мультимодальность**: Поддержка файлов (текст, изображения, код), распознавание речи (голосовой ввод) и озвучивание ответов.
+
+---
+
+## 🚀 Сборка проекта
+
+### Android
+```bash
+npm install
+npm run build
+npx cap sync android
+cd android && ./gradlew assembleDebug
+```
+
+### Windows (ПК)
+```bash
+npm install
+npm run build
+npx electron-builder --win
+```

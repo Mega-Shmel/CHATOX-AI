@@ -22,27 +22,36 @@ async function generateIcons() {
     }
 
     const iconPng = path.join(assetsDir, 'icon.png');
+    const iconIco = path.join(assetsDir, 'icon.ico');
     const setupPng = path.join(assetsDir, 'setup-icon.png');
     const setupIco = path.join(assetsDir, 'setup-icon.ico');
 
-    if (!fs.existsSync(iconPng)) {
-      fs.writeFileSync(iconPng, Buffer.from(DEFAULT_PNG_BASE64, 'base64'));
-      console.log('Created default assets/icon.png');
+    // 1. Process icon.png -> icon.ico
+    if (fs.existsSync(iconPng)) {
+      try {
+        console.log('Converting assets/icon.png to assets/icon.ico...');
+        const buf = await pngToIco(iconPng);
+        fs.writeFileSync(iconIco, buf);
+        console.log('Successfully generated assets/icon.ico');
+      } catch (err) {
+        console.warn('Could not convert icon.png to ICO (using fallback if needed):', err.message);
+      }
     }
 
-    if (!fs.existsSync(setupPng)) {
-      fs.writeFileSync(setupPng, Buffer.from(DEFAULT_PNG_BASE64, 'base64'));
-      console.log('Created default assets/setup-icon.png');
-    }
-
-    if (!fs.existsSync(setupIco) && fs.existsSync(setupPng)) {
-      console.log('Converting assets/setup-icon.png to assets/setup-icon.ico...');
-      const buf = await pngToIco(setupPng);
-      fs.writeFileSync(setupIco, buf);
-      console.log('Successfully generated assets/setup-icon.ico');
+    // 2. Process setup-icon.png -> setup-icon.ico (or fallback to icon.png)
+    const sourceSetupPng = fs.existsSync(setupPng) ? setupPng : (fs.existsSync(iconPng) ? iconPng : null);
+    if (sourceSetupPng) {
+      try {
+        console.log(`Converting ${sourceSetupPng} to assets/setup-icon.ico...`);
+        const buf = await pngToIco(sourceSetupPng);
+        fs.writeFileSync(setupIco, buf);
+        console.log('Successfully generated assets/setup-icon.ico');
+      } catch (err) {
+        console.warn('Could not convert setup-icon.png to ICO:', err.message);
+      }
     }
   } catch (err) {
-    console.error('Error generating icons (non-fatal):', err);
+    console.error('Icon generator error (non-fatal):', err);
   }
 }
 
