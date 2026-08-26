@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { X, HardDrive, FolderPlus, Upload, Check, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CustomModelItem } from '../types';
+import { CustomModelItem, AppLanguage } from '../types';
 import { getContrastColor } from '../utils/color';
+import { getTranslation } from '../i18n/translations';
 
 interface CustomModelModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface CustomModelModalProps {
   onAddModel: (model: CustomModelItem) => void;
   copyToAppData: boolean;
   accentColor: string;
+  language?: AppLanguage;
 }
 
 export const CustomModelModal: React.FC<CustomModelModalProps> = ({
@@ -18,7 +20,9 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
   onAddModel,
   copyToAppData,
   accentColor,
+  language = 'ru',
 }) => {
+  const t = getTranslation(language);
   const [modelType, setModelType] = useState<'file' | 'ollama'>('file');
   const [customName, setCustomName] = useState('');
   const [format, setFormat] = useState<'GGUF' | 'ONNX' | 'safetensors'>('GGUF');
@@ -96,15 +100,16 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
                 <HardDrive className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Добавить свою модель</h3>
+                <h3 className="text-lg font-bold text-white">{t.addCustomModelTitle}</h3>
                 <p className="text-xs text-neutral-400">
-                  GGUF / ONNX / safetensors или локальный сервер Ollama
+                  {t.addCustomModelSub}
                 </p>
               </div>
             </div>
             <button
               onClick={onClose}
               className="flex items-center justify-center w-8 h-8 text-neutral-400 transition-colors border rounded-xl border-white/10 hover:bg-white/10 hover:text-white"
+              title={t.doneClose}
             >
               <X className="w-4 h-4" />
             </button>
@@ -125,7 +130,7 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
                   : { color: '#a3a3a3' }
               }
             >
-              Файл модели (GGUF / ONNX)
+              {t.tabModelFile}
             </button>
             <button
               onClick={() => setModelType('ollama')}
@@ -140,20 +145,20 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
                   : { color: '#a3a3a3' }
               }
             >
-              Локальный эндпоинт (Ollama)
+              {t.tabOllama}
             </button>
           </div>
 
           <div className="space-y-4">
             <div>
               <label className="block mb-1.5 text-xs font-medium text-neutral-300">
-                Отображаемое имя модели (берется из имени файла)
+                {t.modelNameLabel}
               </label>
               <input
                 type="text"
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
-                placeholder="Имя модели без расширения..."
+                placeholder="Llama-3-8B-Q4..."
                 className="w-full px-3.5 py-2.5 bg-black/60 border rounded-xl text-white placeholder-neutral-500 text-sm focus:outline-none"
                 style={{ borderColor: `${accentColor}40` }}
               />
@@ -163,7 +168,7 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
               <>
                 <div>
                   <label className="block mb-1.5 text-xs font-medium text-neutral-300">
-                    Формат весов
+                    {t.fontTitle}
                   </label>
                   <div className="flex gap-2">
                     {(['GGUF', 'ONNX', 'safetensors'] as const).map((fmt) => (
@@ -193,7 +198,7 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
 
                 <div>
                   <label className="block mb-1.5 text-xs font-medium text-neutral-300">
-                    Выбор файла через проводник
+                    {t.chooseModelFile}
                   </label>
                   <input
                     ref={fileInputRef}
@@ -211,10 +216,10 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
                   >
                     <FolderPlus className="w-8 h-8 mb-2" style={{ color: accentColor }} />
                     <span className="text-xs font-medium text-white">
-                      {selectedFileName || 'Нажмите для открытия проводника файлов'}
+                      {selectedFileName || t.chooseModelFile}
                     </span>
                     <span className="text-[11px] text-neutral-500 mt-1">
-                      Поддерживаются .gguf, .onnx, .safetensors
+                      .gguf, .onnx, .safetensors
                     </span>
                   </div>
                 </div>
@@ -228,14 +233,14 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
                       color: '#ffffff',
                     }}
                   >
-                    &bull; Опция "Копировать в AppData" включена: файл будет продублирован в защищенное хранилище приложения.
+                    &bull; {t.copyAppDataNotice}
                   </div>
                 )}
               </>
             ) : (
               <div>
                 <label className="block mb-1.5 text-xs font-medium text-neutral-300">
-                  URL локального сервера Ollama / vLLM
+                  {t.endpointLabel}
                 </label>
                 <input
                   type="text"
@@ -253,7 +258,7 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
                 onClick={onClose}
                 className="px-4 py-2.5 text-xs font-medium border border-white/10 rounded-xl text-neutral-400 hover:bg-white/5"
               >
-                Отмена
+                {t.doneClose}
               </button>
               <button
                 onClick={handleAdd}
@@ -267,7 +272,7 @@ export const CustomModelModal: React.FC<CustomModelModalProps> = ({
                 }}
               >
                 <Check className="w-4 h-4" />
-                <span>Сохранить модель</span>
+                <span>{t.addModelBtn}</span>
               </button>
             </div>
           </div>

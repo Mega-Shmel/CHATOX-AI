@@ -84,9 +84,12 @@ export interface SecurityConfig {
   lockoutUntil?: number;
 }
 
+export type AppLanguage = 'ru' | 'en' | 'zh';
+
 export interface CustomizationConfig {
   useSimpleNames: boolean;
   userName: string; // "Skipped" or user's custom name
+  language?: AppLanguage;
   primaryColor: string;
   primaryColorName?: string;
   accentColor: string;
@@ -116,6 +119,15 @@ export interface LocalPortConfig {
   discoveredModels: DiscoveredModel[];
 }
 
+export type NetworkProxyMode = 'mirror' | 'direct' | 'custom';
+
+export interface NetworkProxyConfig {
+  mode: NetworkProxyMode; // 'mirror' (default for RU: cloud proxy without VPN), 'direct' (VPN/Xbox DNS), 'custom'
+  customGoogleMirrorUrl?: string;
+  customProxyUrl?: string;
+  proxyAllProviders?: boolean;
+}
+
 export interface AppSettings {
   apiKeys: Record<ProviderId, string>;
   systemPrompt: string;
@@ -123,6 +135,8 @@ export interface AppSettings {
   maxMessagesInContext: number;
   maxSavedChats: number;
   copyModelsToAppData: boolean;
+  saveToExternalStorage?: boolean; // Mobile external root storage / CHATOX_Data near Download
+  networkProxy: NetworkProxyConfig;
   enabledModelIds: string[];
   customModels: CustomModelItem[];
   modelConfigs: Record<string, ModelCustomConfig>;

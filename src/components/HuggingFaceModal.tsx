@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { X, Smile, Search, Plus, Check, Download, Heart, Tag, RefreshCw, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CustomModelItem } from '../types';
+import { CustomModelItem, AppLanguage } from '../types';
 import { getContrastColor } from '../utils/color';
+import { getTranslation } from '../i18n/translations';
 
 interface HuggingFaceModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAddModel: (model: CustomModelItem) => void;
   accentColor: string;
+  language?: AppLanguage;
 }
 
 interface HFModelItem {
@@ -27,7 +29,9 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
   onClose,
   onAddModel,
   accentColor,
+  language = 'ru',
 }) => {
+  const t = getTranslation(language);
   const [searchQuery, setSearchQuery] = useState('');
   const [customRepoId, setCustomRepoId] = useState('');
   const [models, setModels] = useState<HFModelItem[]>([]);
@@ -67,14 +71,14 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
           likes: m.likes || 0,
           pipeline_tag: m.pipeline_tag || 'text-generation',
           tags: Array.isArray(m.tags) ? m.tags.slice(0, 5) : [],
-          isGGUF: Array.isArray(m.tags) && m.tags.some((t: string) => t.toLowerCase().includes('gguf')),
+          isGGUF: Array.isArray(m.tags) && m.tags.some((tg: string) => tg.toLowerCase().includes('gguf')),
         }));
         setModels(formatted);
       } else {
-        setError('Не удалось загрузить список моделей с Hugging Face');
+        setError('Hugging Face API error');
       }
     } catch (e: any) {
-      setError('Ошибка прямого подключения к Hugging Face API');
+      setError('Direct connection error to Hugging Face');
     } finally {
       setIsLoading(false);
     }
@@ -136,19 +140,20 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-white">Прямое подключение к Hugging Face</h3>
+                  <h3 className="text-base font-bold text-white">{t.hfTitle}</h3>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300">
-                    Live API Hub
+                    Live Hub
                   </span>
                 </div>
                 <p className="text-xs text-neutral-400">
-                  Поиск и прямое добавление открытых моделей и GGUF-репозиториев
+                  Hugging Face Hub (GGUF, Llama, Qwen, DeepSeek)
                 </p>
               </div>
             </div>
             <button
               onClick={onClose}
               className="flex items-center justify-center w-8 h-8 text-neutral-400 transition-colors border rounded-xl border-white/10 hover:bg-white/10 hover:text-white"
+              title={t.doneClose}
             >
               <X className="w-4 h-4" />
             </button>
@@ -163,7 +168,7 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Поиск по Hugging Face Hub (например: Qwen2.5 GGUF, Llama-3.3, Mistral, DeepSeek)..."
+                  placeholder={t.hfSearchPlaceholder}
                   className="w-full pl-10 pr-4 py-2.5 bg-black/60 border border-purple-500/30 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-purple-400 text-xs"
                 />
               </div>
@@ -179,12 +184,11 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
                 }}
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                <span>Найти</span>
+                <span>{isLoading ? '...' : t.testPing}</span>
               </button>
             </form>
 
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-neutral-400">Фильтр:</span>
               <button
                 onClick={() => setActiveFilter('gguf')}
                 className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
@@ -193,7 +197,7 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
                     : 'bg-black/40 border border-white/10 text-neutral-400 hover:text-white'
                 }`}
               >
-                GGUF / Квантованные
+                {t.hfFilterGguf}
               </button>
               <button
                 onClick={() => setActiveFilter('all')}
@@ -203,7 +207,7 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
                     : 'bg-black/40 border border-white/10 text-neutral-400 hover:text-white'
                 }`}
               >
-                Все текстовые модели
+                {t.hfFilterAll}
               </button>
             </div>
           </div>
@@ -213,7 +217,7 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
             {isLoading ? (
               <div className="flex flex-col items-center justify-center py-12 text-neutral-400 gap-2">
                 <RefreshCw className="w-6 h-6 animate-spin text-purple-400" />
-                <span className="text-xs">Загрузка репозиториев напрямую с Hugging Face...</span>
+                <span className="text-xs">Loading Hugging Face Hub...</span>
               </div>
             ) : error ? (
               <div className="p-4 border rounded-2xl bg-red-950/20 border-red-500/30 text-xs text-red-300 text-center">
@@ -221,7 +225,7 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
               </div>
             ) : filteredModels.length === 0 ? (
               <div className="py-10 text-center text-xs text-neutral-400">
-                Модели не найдены. Попробуйте изменить поисковый запрос (например "DeepSeek GGUF", "Llama").
+                {t.noModelsFound}
               </div>
             ) : (
               filteredModels.map((model) => {
@@ -249,7 +253,7 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
                       <div className="flex items-center gap-3 mt-1.5 text-[10px] text-neutral-400">
                         <span className="flex items-center gap-1">
                           <Download className="w-3 h-3 text-neutral-500" />
-                          {model.downloads.toLocaleString()}
+                          {model.downloads.toLocaleString()} {t.hfDownloads}
                         </span>
                         <span className="flex items-center gap-1">
                           <Heart className="w-3 h-3 text-pink-500/70" />
@@ -282,7 +286,7 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
                       }
                     >
                       {isAdded ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                      <span>{isAdded ? 'Добавлено' : 'Подключить'}</span>
+                      <span>{isAdded ? t.hfAdded : t.hfAdd}</span>
                     </button>
                   </div>
                 );
@@ -293,14 +297,14 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
           {/* Custom Repo ID direct connection */}
           <div className="pt-4 mt-4 border-t border-white/10">
             <label className="block mb-2 text-xs font-semibold tracking-wide uppercase text-neutral-400">
-              Или укажите точный Repo ID с Hugging Face
+              {t.hfDirectRepoLabel}
             </label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={customRepoId}
                 onChange={(e) => setCustomRepoId(e.target.value)}
-                placeholder="organization/model-name (например: bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF)"
+                placeholder="organization/model-name (e.g.: bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF)"
                 className="flex-1 px-3.5 py-2.5 bg-black/60 border border-purple-500/30 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-purple-400 text-xs font-mono"
               />
               <button
@@ -319,7 +323,7 @@ export const HuggingFaceModal: React.FC<HuggingFaceModalProps> = ({
                   boxShadow: `0 0 15px ${accentColor}50`,
                 }}
               >
-                Подключить модель
+                {t.hfAddRepoBtn}
               </button>
             </div>
           </div>

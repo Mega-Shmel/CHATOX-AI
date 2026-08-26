@@ -3,7 +3,7 @@
   "description": "CHATOX AI - Universal AI Assistant and Chat Platform",
   "author": "CHATOX AI Team",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.8.2",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { X, Terminal, Trash2, Download, Filter, Info, AlertTriangle, AlertCircle, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LogEntry } from '../types';
+import { LogEntry, AppLanguage } from '../types';
 import { getContrastColor } from '../utils/color';
+import { getTranslation } from '../i18n/translations';
 
 interface ConsoleModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface ConsoleModalProps {
   logs: LogEntry[];
   onClearLogs: () => void;
   accentColor: string;
+  language?: AppLanguage;
 }
 
 export const ConsoleModal: React.FC<ConsoleModalProps> = ({
@@ -18,7 +20,9 @@ export const ConsoleModal: React.FC<ConsoleModalProps> = ({
   logs,
   onClearLogs,
   accentColor,
+  language = 'ru',
 }) => {
+  const t = getTranslation(language);
   const [filterLevel, setFilterLevel] = useState<'all' | 'info' | 'warn' | 'error' | 'api'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -105,13 +109,13 @@ export const ConsoleModal: React.FC<ConsoleModalProps> = ({
             className="flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4 border-b border-white/10"
             style={{ backgroundColor: 'var(--panel-card-bg)' }}
           >
-            {/* Top-left close button as explicitly requested in prompt */}
+            {/* Top-left close button */}
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <button
                 id="console-close-btn"
                 onClick={onClose}
                 className="flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 text-neutral-400 transition-colors border rounded-xl border-white/10 hover:bg-white/10 hover:text-white shrink-0"
-                title="Закрыть консоль"
+                title={t.doneClose}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -119,7 +123,7 @@ export const ConsoleModal: React.FC<ConsoleModalProps> = ({
               <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                 <Terminal className="w-4 h-4 sm:w-5 sm:h-5 text-purple-400 shrink-0" />
                 <h3 className="text-xs sm:text-base font-semibold tracking-wide text-white truncate">
-                  Консоль CHATOX AI
+                  {t.consoleTitle}
                 </h3>
               </div>
             </div>
@@ -129,20 +133,20 @@ export const ConsoleModal: React.FC<ConsoleModalProps> = ({
                 id="console-clear-btn"
                 onClick={onClearLogs}
                 className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 text-xs font-medium text-neutral-300 border border-white/10 rounded-lg hover:bg-white/5 transition-colors"
-                title="Очистить журнал"
+                title={t.clearLogs}
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span className="hidden xs:inline">Очистить</span>
+                <span className="hidden xs:inline">{t.clearLogs}</span>
               </button>
 
               <button
                 id="console-export-btn"
                 onClick={handleExportLogs}
                 className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 text-xs font-medium text-purple-300 border border-purple-500/30 bg-purple-950/40 rounded-lg hover:bg-purple-900/50 transition-colors shadow-[0_0_12px_rgba(138,43,226,0.3)]"
-                title="Скачать файл логов"
+                title={t.exportLogs}
               >
                 <Download className="w-3.5 h-3.5" />
-                <span className="hidden xs:inline">Экспорт</span>
+                <span className="hidden xs:inline">{t.exportLogs}</span>
               </button>
             </div>
           </div>
@@ -171,7 +175,7 @@ export const ConsoleModal: React.FC<ConsoleModalProps> = ({
                       : {}
                   }
                 >
-                  {lvl}
+                  {lvl === 'all' ? t.allLogs : lvl}
                 </button>
               ))}
             </div>
@@ -182,7 +186,7 @@ export const ConsoleModal: React.FC<ConsoleModalProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Поиск по логам..."
+                placeholder={t.searchLogsPlaceholder}
                 className="w-full px-3 py-1.5 bg-black/60 border border-white/10 rounded-lg text-white placeholder-neutral-500 focus:outline-none focus:border-purple-500 text-xs"
               />
             </div>
@@ -193,7 +197,7 @@ export const ConsoleModal: React.FC<ConsoleModalProps> = ({
             {filteredLogs.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-neutral-500 py-12">
                 <Terminal className="w-8 h-8 mb-2 opacity-40" />
-                <p>Нет записей в журнале</p>
+                <p>{t.noLogs}</p>
               </div>
             ) : (
               filteredLogs.map((log) => (

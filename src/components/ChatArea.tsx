@@ -16,8 +16,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
-import { ChatMessage, ModelOption } from '../types';
+import { ChatMessage, ModelOption, AppLanguage } from '../types';
 import { getContrastColor } from '../utils/color';
+import { getTranslation } from '../i18n/translations';
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -29,6 +30,7 @@ interface ChatAreaProps {
   isDotsMenuOpen: boolean;
   onToggleDotsMenu: () => void;
   accentColor: string;
+  language?: AppLanguage;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -41,7 +43,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   isDotsMenuOpen,
   onToggleDotsMenu,
   accentColor,
+  language = 'ru',
 }) => {
+  const t = getTranslation(language);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
 
@@ -59,15 +63,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'ru-RU';
+      utterance.lang = language === 'zh' ? 'zh-CN' : language === 'en' ? 'en-US' : 'ru-RU';
       window.speechSynthesis.speak(utterance);
     }
   };
 
   const greetingText =
     userName && userName !== 'Skipped'
-      ? `Привет, ${userName}! Поработаем?`
-      : 'Привет! Поработаем?';
+      ? t.greetingHello.replace('{name}', userName)
+      : t.greetingDefault;
 
   return (
     <div className="relative flex-1 flex flex-col w-full h-full overflow-hidden">
@@ -83,10 +87,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             borderColor: `${accentColor}60`,
             boxShadow: `0 0 15px ${accentColor}30`,
           }}
-          title="Открыть список чатов"
+          title={t.openChatList}
         >
           <MessageSquare className="w-4 h-4 shrink-0" style={{ color: accentColor }} />
-          <span className="hidden sm:inline">Чаты</span>
+          <span className="hidden sm:inline">{t.chatsBtn}</span>
         </button>
 
         {/* Center title or active model indicator */}
@@ -120,7 +124,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     borderColor: 'rgba(255, 255, 255, 0.1)',
                   }
             }
-            title="Меню приложения"
+            title={t.appMenu}
           >
             <MoreVertical className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
@@ -146,14 +150,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     onOpenConsole();
                   }}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-neutral-200 hover:text-white transition-all"
-                  style={{
-                    ['--hover-bg' as any]: `${accentColor}30`,
-                  }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${accentColor}25`)}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                 >
                   <Terminal className="w-4 h-4" style={{ color: accentColor }} />
-                  <span>Консоль (Логи)</span>
+                  <span>{t.consoleLogs}</span>
                 </button>
 
                 <button
@@ -167,7 +168,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                 >
                   <Settings className="w-4 h-4" style={{ color: accentColor }} />
-                  <span>Настройки</span>
+                  <span>{t.settings}</span>
                 </button>
               </motion.div>
             )}
@@ -217,7 +218,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               transition={{ delay: 0.3, duration: 0.5 }}
               className="text-xs sm:text-sm md:text-base text-neutral-400 max-w-md leading-relaxed px-2"
             >
-              Задайте любой вопрос, отправьте файл или воспользуйтесь голосовым вводом. Текущая модель:{' '}
+              {t.greetingSub}{' '}
               <span className="font-semibold" style={{ color: accentColor }}>
                 {activeModel.name}
               </span>.
@@ -228,6 +229,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           <div className="w-full max-w-4xl mx-auto space-y-4 sm:space-y-5">
             {messages.map((msg) => {
               const isUser = msg.role === 'user';
+              const userTextColor = getContrastColor(accentColor);
               return (
                 <motion.div
                   key={msg.id}
@@ -254,13 +256,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     <div
                       className={`relative p-3.5 sm:p-4 md:p-5 rounded-2xl text-xs sm:text-sm md:text-base leading-relaxed break-words ${
                         isUser
-                          ? 'text-white rounded-br-sm border'
+                          ? 'rounded-br-sm border font-medium'
                           : 'bg-[#110d24]/90 text-neutral-100 rounded-bl-sm border backdrop-blur-md shadow-lg'
                       }`}
                       style={
                         isUser
                           ? {
                               backgroundColor: accentColor,
+                              color: userTextColor,
                               borderColor: `${accentColor}80`,
                               boxShadow: `0 0 25px ${accentColor}50`,
                             }
@@ -275,12 +278,23 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           {msg.attachments.map((att, i) => (
                             <div
                               key={i}
-                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/40 border border-white/20 text-xs text-white"
+                              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs ${
+                                isUser
+                                  ? 'bg-black/20 border border-black/10'
+                                  : 'bg-black/40 border border-white/20 text-white'
+                              }`}
+                              style={isUser ? { color: userTextColor } : {}}
                             >
                               {att.type.startsWith('image/') ? (
-                                <ImageIcon className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                                <ImageIcon
+                                  className="w-3.5 h-3.5"
+                                  style={{ color: isUser ? userTextColor : accentColor }}
+                                />
                               ) : (
-                                <FileText className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                                <FileText
+                                  className="w-3.5 h-3.5"
+                                  style={{ color: isUser ? userTextColor : accentColor }}
+                                />
                               )}
                               <span className="truncate max-w-[140px]">{att.name}</span>
                             </div>
@@ -290,7 +304,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                       {/* Content rendering */}
                       {isUser ? (
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <p className="whitespace-pre-wrap" style={{ color: userTextColor }}>
+                          {msg.content}
+                        </p>
                       ) : (
                         <div className="markdown-body prose prose-invert max-w-none text-neutral-200">
                           <ReactMarkdown>{msg.content}</ReactMarkdown>
@@ -307,7 +323,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                       {msg.status === 'error' && (
                         <div className="flex items-center gap-2 mt-2 p-2 rounded-lg bg-red-950/60 border border-red-500/40 text-xs text-red-300">
                           <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                          <span>{msg.errorDetails || 'Ошибка генерации ответа'}</span>
+                          <span>{msg.errorDetails || t.generationError}</span>
                         </div>
                       )}
                     </div>
@@ -331,23 +347,23 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           <button
                             onClick={() => handleCopy(msg.content, msg.id)}
                             className="flex items-center gap-1 hover:text-white transition-colors"
-                            title="Скопировать ответ"
+                            title={t.copyMessage}
                           >
                             {copiedId === msg.id ? (
                               <Check className="w-3 h-3 text-emerald-400" />
                             ) : (
                               <Copy className="w-3 h-3" />
                             )}
-                            <span>{copiedId === msg.id ? 'Скопировано' : 'Копировать'}</span>
+                            <span>{copiedId === msg.id ? t.copied : t.copy}</span>
                           </button>
 
                           <button
                             onClick={() => handleSpeak(msg.content)}
                             className="flex items-center gap-1 hover:text-white transition-colors"
-                            title="Озвучить"
+                            title={t.speak}
                           >
                             <Volume2 className="w-3 h-3" />
-                            <span>Озвучить</span>
+                            <span>{t.speak}</span>
                           </button>
                         </>
                       )}
@@ -356,10 +372,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                   {isUser && (
                     <div
-                      className="flex items-center justify-center w-9 h-9 rounded-2xl border text-white shrink-0 mt-1 shadow-md"
+                      className="flex items-center justify-center w-9 h-9 rounded-2xl border shrink-0 mt-1 shadow-md"
                       style={{
                         backgroundColor: `${accentColor}40`,
                         borderColor: `${accentColor}70`,
+                        color: userTextColor,
                       }}
                     >
                       <User className="w-5 h-5" />

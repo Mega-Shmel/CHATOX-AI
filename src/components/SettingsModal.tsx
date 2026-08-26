@@ -27,6 +27,18 @@ import {
   Copy,
   FileCode,
   ExternalLink,
+  Save,
+  Globe,
+  Wifi,
+  Zap,
+  Network,
+  HelpCircle,
+  Activity,
+  ArrowRight,
+  Sliders,
+  ChevronLeft,
+  ChevronRight,
+  Languages,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -36,7 +48,10 @@ import {
   CustomModelItem,
   LocalPortConfig,
   DiscoveredModel,
+  NetworkProxyMode,
+  AppLanguage,
 } from '../types';
+import { getTranslation } from '../i18n/translations';
 import {
   PROVIDERS_LIST,
   PRESET_THEME_COLORS,
@@ -44,7 +59,13 @@ import {
   PRESET_FONTS,
 } from '../data/defaultModels';
 import { getContrastColor, isLightColor } from '../utils/color';
-import { discoverLocalPort, discoverProviderModels } from '../services/apiService';
+import {
+  discoverLocalPort,
+  discoverProviderModels,
+  isNativeMobile,
+  testMirrorLatency,
+} from '../services/apiService';
+import { saveToExternalRootStorage, exportManualBackupFile } from '../utils/externalStorage';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -73,7 +94,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   discoverResults,
   shakeTab2,
 }) => {
-  const [activeTab, setActiveTab] = useState<'models' | 'security' | 'customization'>('models');
+  const [activeTab, setActiveTab] = useState<'models' | 'network' | 'security' | 'customization'>('models');
   const [visibleKeyProvider, setVisibleKeyProvider] = useState<ProviderId | null>(null);
   const [editingCustomModelId, setEditingCustomModelId] = useState<string | null>(null);
   const [editingCustomModelName, setEditingCustomModelName] = useState('');
@@ -87,7 +108,149 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [portStatus, setPortStatus] = useState<string | null>(null);
   const [testingProviderKey, setTestingProviderKey] = useState<ProviderId | null>(null);
   const [providerTestResults, setProviderTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
+  const [backupStatus, setBackupStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+
+  // Network / Mirror state
+  const [isTestingMirror, setIsTestingMirror] = useState(false);
+  const [mirrorTestResult, setMirrorTestResult] = useState<{ success: boolean; latencyMs?: number; status: string; error?: string } | null>(null);
+  const [showDnsHelp, setShowDnsHelp] = useState(false);
+  const [copiedText, setCopiedText] = useState<string | null>(null);
+
   const fontInputRef = useRef<HTMLInputElement>(null);
+
+  const isMobileEnvironment = isNativeMobile();
+
+  const currentLanguage = settings.customization.language || 'ru';
+  const t = getTranslation(currentLanguage);
+
+  const TABS: ('models' | 'network' | 'security' | 'customization')[] = [
+    'models',
+    'network',
+    'security',
+    'customization',
+  ];
+
+  const currentTabIndex = TABS.indexOf(activeTab);
+
+  const tabModelsRef = useRef<HTMLButtonElement>(null);
+  const tabNetworkRef = useRef<HTMLButtonElement>(null);
+  const tabSecurityRef = useRef<HTMLButtonElement>(null);
+  const tabCustomizationRef = useRef<HTMLButtonElement>(null);
+  const tabScrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const tabRefs: Record<string, React.RefObject<HTMLButtonElement>> = {
+    models: tabModelsRef,
+    network: tabNetworkRef,
+    security: tabSecurityRef,
+    customization: tabCustomizationRef,
+  };
+
+  useEffect(() => {
+    if (tabRefs[activeTab]?.current) {
+      tabRefs[activeTab].current?.scrollIntoView({
+        behavior: 'smooth',
+        inline: 'center',
+        block: 'nearest',
+      });
+    }
+  }, [activeTab]);
+
+  const handlePrevTab = () => {
+    const nextIdx = (currentTabIndex - 1 + TABS.length) % TABS.length;
+    setActiveTab(TABS[nextIdx]);
+  };
+
+  const handleNextTab = () => {
+    const nextIdx = (currentTabIndex + 1) % TABS.length;
+    setActiveTab(TABS[nextIdx]);
+  };
+
+  // Touch swipe handling for mobile
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX;
+    touchStartYRef.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartXRef.current;
+    const deltaY = e.changedTouches[0].clientY - touchStartYRef.current;
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+
+    if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.25) {
+      if (deltaX < 0) {
+        handleNextTab();
+      } else {
+        handlePrevTab();
+      }
+    }
+  };
+
+  const handleCopyText = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedText(label);
+    setTimeout(() => setCopiedText(null), 2500);
+  };
+
+  const handleTestMirror = async () => {
+    setIsTestingMirror(true);
+    setMirrorTestResult(null);
+    try {
+      const customUrl = settings.networkProxy?.mode === 'custom' ? settings.networkProxy.customGoogleMirrorUrl : undefined;
+      const res = await testMirrorLatency(customUrl);
+      setMirrorTestResult(res);
+    } catch (e: any) {
+      setMirrorTestResult({
+        success: false,
+        status: 'Ошибка проверки соединения',
+        error: e?.message || 'Не удалось выполнить запрос к зеркалу',
+      });
+    } finally {
+      setIsTestingMirror(false);
+    }
+  };
+
+  const handleCreateExternalBackup = async () => {
+    setIsBackingUp(true);
+    setBackupStatus(null);
+    try {
+      // Get current chats from storage
+      const rawChats = localStorage.getItem('chatox_chats_enc') || '[]';
+      let chatsList: any[] = [];
+      try {
+        if (rawChats.trim().startsWith('[')) {
+          chatsList = JSON.parse(rawChats);
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      const res = await saveToExternalRootStorage(settings, chatsList);
+      if (res.success) {
+        setBackupStatus({
+          success: true,
+          message: `Резервная копия сохранена: ${res.path || 'CHATOX_Data'}`,
+        });
+      } else {
+        setBackupStatus({
+          success: false,
+          message: res.error || 'Ошибка при создании резервной копии',
+        });
+      }
+    } catch (e: any) {
+      setBackupStatus({
+        success: false,
+        message: e?.message || 'Сбой записи',
+      });
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
 
   const handleTestSingleKey = async (providerId: ProviderId) => {
     const key = settings.apiKeys[providerId] || '';
@@ -254,11 +417,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         >
           {/* Sidebar / Top Tabs navigation */}
           <div
-            className="w-full md:w-60 border-b md:border-b-0 md:border-r border-white/10 p-3 sm:p-4 md:p-5 flex flex-col md:justify-between shrink-0"
+            className="w-full md:w-64 border-b md:border-b-0 md:border-r border-white/10 p-3 sm:p-4 md:p-5 flex flex-col md:justify-between shrink-0"
             style={{ backgroundColor: 'var(--panel-card-bg)' }}
           >
             <div>
-              <div className="flex items-center justify-between md:justify-start gap-2.5 mb-3 md:mb-6 px-1 md:px-2">
+              <div className="flex items-center justify-between md:justify-start gap-2.5 mb-2.5 md:mb-6 px-1 md:px-2">
                 <div className="flex items-center gap-2.5">
                   <div
                     className="flex items-center justify-center w-8 h-8 rounded-xl border shrink-0"
@@ -270,20 +433,75 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   >
                     <Sparkles className="w-4 h-4" />
                   </div>
-                  <h2 className="text-sm sm:text-base font-bold tracking-wide text-white">CHATOX Настройки</h2>
+                  <div>
+                    <h2 className="text-sm sm:text-base font-bold tracking-wide text-white">
+                      {t.settingsTitle}
+                    </h2>
+                    <span className="text-[10px] text-neutral-400 font-mono hidden md:block">
+                      v0.8.2 &bull; {currentLanguage.toUpperCase()}
+                    </span>
+                  </div>
                 </div>
                 {/* Mobile close button in tab bar */}
+                <div className="flex md:hidden items-center gap-1.5">
+                  <span className="text-[10px] text-neutral-400 font-mono px-2 py-0.5 rounded-full bg-white/5 border border-white/10">
+                    {currentTabIndex + 1}/{TABS.length}
+                  </span>
+                  <button
+                    onClick={onClose}
+                    className="flex items-center justify-center w-8 h-8 text-neutral-400 border rounded-xl border-white/10 hover:bg-white/10 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Mobile swipe & scroll navigation buttons */}
+              <div className="flex md:hidden items-center justify-between gap-1 mb-1.5 text-[11px] text-neutral-400 px-1">
                 <button
-                  onClick={onClose}
-                  className="flex md:hidden items-center justify-center w-8 h-8 text-neutral-400 border rounded-xl border-white/10 hover:bg-white/10 hover:text-white"
+                  type="button"
+                  onClick={handlePrevTab}
+                  className="p-1 rounded-lg hover:bg-white/10 text-neutral-300 flex items-center gap-0.5 active:scale-95"
                 >
-                  <X className="w-4 h-4" />
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="text-[10px]">{t.prevTab}</span>
+                </button>
+
+                {/* Pagination Dots indicator */}
+                <div className="flex items-center gap-1.5">
+                  {TABS.map((tabKey, idx) => (
+                    <button
+                      key={tabKey}
+                      onClick={() => setActiveTab(tabKey)}
+                      className={`h-1.5 rounded-full transition-all ${
+                        activeTab === tabKey ? 'w-5' : 'w-1.5 bg-white/20'
+                      }`}
+                      style={{
+                        backgroundColor: activeTab === tabKey ? accentColor : undefined,
+                        boxShadow: activeTab === tabKey ? `0 0 8px ${accentColor}` : undefined,
+                      }}
+                      title={tabKey}
+                    />
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleNextTab}
+                  className="p-1 rounded-lg hover:bg-white/10 text-neutral-300 flex items-center gap-0.5 active:scale-95"
+                >
+                  <span className="text-[10px]">{t.nextTab}</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
 
               {/* Responsive Tabs: Horizontal scroll on mobile/tablet, vertical stack on desktop */}
-              <div className="flex flex-row md:flex-col gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+              <div
+                ref={tabScrollContainerRef}
+                className="flex flex-row md:flex-col gap-2 overflow-x-auto pb-2 md:pb-0 scroll-smooth scrollbar-thin"
+              >
                 <button
+                  ref={tabModelsRef}
                   id="tab-btn-models"
                   onClick={() => setActiveTab('models')}
                   className="flex-1 md:flex-none flex items-center justify-center md:justify-start gap-2.5 px-3.5 py-2.5 md:py-3 rounded-xl font-medium text-xs sm:text-sm whitespace-nowrap transition-all border shrink-0"
@@ -303,10 +521,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   }
                 >
                   <Cpu className="w-4 h-4 shrink-0" />
-                  <span>ИИ-модели</span>
+                  <span>{t.tabModels}</span>
+                </button>
+
+                <button
+                  ref={tabNetworkRef}
+                  id="tab-btn-network"
+                  onClick={() => setActiveTab('network')}
+                  className="flex-1 md:flex-none flex items-center justify-center md:justify-start gap-2.5 px-3.5 py-2.5 md:py-3 rounded-xl font-medium text-xs sm:text-sm whitespace-nowrap transition-all border shrink-0 relative"
+                  style={
+                    activeTab === 'network'
+                      ? {
+                          backgroundColor: accentColor,
+                          borderColor: `${accentColor}80`,
+                          color: getContrastColor(accentColor),
+                          boxShadow: `0 0 20px ${accentColor}60`,
+                        }
+                      : {
+                          backgroundColor: 'transparent',
+                          borderColor: 'transparent',
+                          color: '#a3a3a3',
+                        }
+                  }
+                >
+                  <Globe className="w-4 h-4 shrink-0" />
+                  <span>{t.tabNetwork}</span>
+                  <span className="hidden lg:inline text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30 ml-auto">
+                    {t.rfSupportBadge}
+                  </span>
                 </button>
 
                 <motion.button
+                  ref={tabSecurityRef}
                   id="tab-btn-security"
                   animate={
                     shakeTab2
@@ -332,10 +578,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   }
                 >
                   <Shield className="w-4 h-4 shrink-0" />
-                  <span>Безопасность</span>
+                  <span>{t.tabSecurity}</span>
                 </motion.button>
 
                 <button
+                  ref={tabCustomizationRef}
                   id="tab-btn-customization"
                   onClick={() => setActiveTab('customization')}
                   className="flex-1 md:flex-none flex items-center justify-center md:justify-start gap-2.5 px-3.5 py-2.5 md:py-3 rounded-xl font-medium text-xs sm:text-sm whitespace-nowrap transition-all border shrink-0"
@@ -355,7 +602,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   }
                 >
                   <Palette className="w-4 h-4 shrink-0" />
-                  <span>Кастомизация</span>
+                  <span>{t.tabCustomization}</span>
                 </button>
               </div>
             </div>
@@ -366,25 +613,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onClick={onClose}
                 className="w-full py-2.5 px-4 text-xs font-semibold text-neutral-300 border border-white/10 rounded-xl hover:bg-white/5 transition-colors"
               >
-                Готово / Закрыть
+                {t.doneClose}
               </button>
             </div>
           </div>
 
-          {/* Main Tab Content */}
-          <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#07060f]">
+          {/* Main Tab Content with Touch Swipe Support */}
+          <div
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            className="flex-1 flex flex-col h-full overflow-hidden bg-[#07060f]"
+          >
             {/* Header */}
             <div className="flex items-center justify-between px-4 sm:px-6 md:px-8 py-3.5 sm:py-5 border-b border-white/10 bg-black/20">
               <div>
                 <h3 className="text-sm sm:text-base md:text-lg font-bold text-white">
-                  {activeTab === 'models' && 'Конфигурация ИИ-моделей'}
-                  {activeTab === 'security' && 'Безопасность и защита данных'}
-                  {activeTab === 'customization' && 'Кастомизация интерфейса'}
+                  {activeTab === 'models' && t.modelsHeaderTitle}
+                  {activeTab === 'network' && t.networkHeaderTitle}
+                  {activeTab === 'security' && t.securityHeaderTitle}
+                  {activeTab === 'customization' && t.customizationHeaderTitle}
                 </h3>
                 <p className="text-[11px] sm:text-xs text-neutral-400 mt-0.5">
-                  {activeTab === 'models' && 'Управление API-ключами, выбор активных моделей, индивидуальные параметры (⚙️)'}
-                  {activeTab === 'security' && 'Сквозное шифрование AES-256-GCM и защита от переноса'}
-                  {activeTab === 'customization' && 'Палитра тем, кастомные цвета, шрифты и простые названия'}
+                  {activeTab === 'models' && t.modelsHeaderDesc}
+                  {activeTab === 'network' && t.networkHeaderDesc}
+                  {activeTab === 'security' && t.securityHeaderDesc}
+                  {activeTab === 'customization' && t.customizationHeaderDesc}
                 </p>
               </div>
               <button
@@ -393,6 +646,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               >
                 <X className="w-4 h-4" />
               </button>
+            </div>
+
+            {/* Mobile swipe helper bar */}
+            <div className="flex md:hidden items-center justify-between px-4 py-1.5 bg-black/40 border-b border-white/5 text-[10px] text-neutral-400">
+              <span className="flex items-center gap-1">
+                👈 {t.swipeTip} 👉
+              </span>
+              <span className="font-mono text-purple-300">
+                {activeTab === 'models' && t.tabModels}
+                {activeTab === 'network' && t.tabNetwork}
+                {activeTab === 'security' && t.tabSecurity}
+                {activeTab === 'customization' && t.tabCustomization}
+              </span>
             </div>
 
             {/* Scrollable tab body */}
@@ -412,19 +678,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       className="block mb-2 text-xs font-bold tracking-wider uppercase"
                       style={{ color: accentColor }}
                     >
-                      Общий системный промпт (Инструкция поведения ИИ)
+                      {t.globalSystemPromptTitle}
                     </label>
                     <textarea
                       id="system-prompt-input"
                       rows={3}
                       value={settings.systemPrompt}
                       onChange={(e) => onUpdateSettings({ systemPrompt: e.target.value })}
-                      placeholder="Опишите характер, язык, стиль и поведение нейросети для всех запросов..."
+                      placeholder={t.globalSystemPromptPlaceholder}
                       className="w-full px-4 py-3 bg-black/60 border rounded-xl text-white placeholder-neutral-500 text-sm focus:outline-none transition-all"
                       style={{ borderColor: `${accentColor}40` }}
                     />
                     <span className="text-[11px] text-neutral-400 mt-1.5 block">
-                      💡 Для каждой конкретной модели можно задать индивидуальный системный промпт и температуру через значок шестерёнки (⚙️) рядом с чекбоксом.
+                      {t.globalSystemPromptTip}
                     </span>
                   </div>
 
@@ -432,7 +698,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="p-4 border rounded-xl bg-black/40 border-white/10">
                       <label className="block mb-1 text-xs font-medium text-neutral-300">
-                        Макс. сообщений в контексте
+                        {t.maxContextMessages}
                       </label>
                       <input
                         type="number"
@@ -447,13 +713,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="w-full px-3 py-2 bg-black/70 border border-white/10 rounded-lg text-white text-sm"
                       />
                       <span className="text-[11px] text-neutral-500 mt-1 block">
-                        По умолчанию: 20 сообщений
+                        {t.defaultMaxContext}
                       </span>
                     </div>
 
                     <div className="p-4 border rounded-xl bg-black/40 border-white/10">
                       <label className="block mb-1 text-xs font-medium text-neutral-300">
-                        Количество сохраняемых чатов
+                        {t.maxSavedChatsLabel}
                       </label>
                       <input
                         type="number"
@@ -468,7 +734,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="w-full px-3 py-2 bg-black/70 border border-white/10 rounded-lg text-white text-sm"
                       />
                       <span className="text-[11px] text-neutral-500 mt-1 block">
-                        По умолчанию: 5 чатов в зашифрованных файлах
+                        {t.defaultMaxSavedChats}
                       </span>
                     </div>
                   </div>
@@ -499,10 +765,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </label>
                       <div>
                         <span className="text-sm font-semibold text-white">
-                          Поиск ИИ моделей (немного тратит лимит API-ключей)
+                          {t.autoDiscoverTitle}
                         </span>
                         <p className="text-xs text-neutral-400">
-                          Автоматическая проверка и динамическое получение доступных моделей по ключам
+                          {t.autoDiscoverDesc}
                         </p>
                       </div>
                     </div>
@@ -520,7 +786,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         }}
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${isDiscovering ? 'animate-spin' : ''}`} />
-                        <span>{isDiscovering ? 'Проверка...' : 'Поиск моделей'}</span>
+                        <span>{isDiscovering ? t.discovering : t.discoverModels}</span>
                       </button>
                     )}
                   </div>
@@ -537,7 +803,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       }}
                     >
                       <Plus className="w-4 h-4" />
-                      <span>Добавить модель из Hugging Face</span>
+                      <span>{t.addFromHuggingFace}</span>
                     </button>
 
                     <button
@@ -545,7 +811,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-neutral-200 border border-white/10 bg-black/40 hover:bg-white/5 rounded-xl transition-all"
                     >
                       <FolderOpen className="w-4 h-4" style={{ color: accentColor }} />
-                      <span>Добавить свою модель (GGUF, ONNX)</span>
+                      <span>{t.addCustomModel}</span>
                     </button>
                   </div>
 
@@ -571,7 +837,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
                         <div>
                           <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                            Подключение по локальному порту
+                            {t.localPortTitle}
                             <span
                               className="text-[10px] px-2 py-0.5 rounded-full border font-mono"
                               style={{
@@ -584,7 +850,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </span>
                           </h4>
                           <p className="text-xs text-neutral-400">
-                            Отдельный переключатель и обнаружение локально запущенных моделей
+                            {t.localPortDesc}
                           </p>
                         </div>
                       </div>
@@ -622,7 +888,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
                             <label className="block mb-1 text-[11px] text-neutral-400 font-medium">
-                              Хост (IP)
+                              {t.hostIp}
                             </label>
                             <input
                               type="text"
@@ -643,7 +909,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                           <div>
                             <label className="block mb-1 text-[11px] text-neutral-400 font-medium">
-                              Порт
+                              {t.port}
                             </label>
                             <input
                               type="number"
@@ -664,7 +930,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                           <div>
                             <label className="block mb-1 text-[11px] text-neutral-400 font-medium">
-                              Тип сервера
+                              {t.serverType}
                             </label>
                             <select
                               value={localPortConfig.serverType || 'ollama'}
@@ -698,7 +964,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             }}
                           >
                             <RefreshCw className={`w-3.5 h-3.5 ${isDiscoveringPort ? 'animate-spin' : ''}`} />
-                            <span>{isDiscoveringPort ? 'Подключение...' : 'Обнаружить модели на порту'}</span>
+                            <span>{isDiscoveringPort ? t.connecting : t.discoverPortModels}</span>
                           </button>
 
                           {portStatus && (
@@ -712,7 +978,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         {localPortConfig.discoveredModels && localPortConfig.discoveredModels.length > 0 && (
                           <div className="space-y-2 pt-2">
                             <span className="text-[11px] text-neutral-400 font-medium block">
-                              Обнаруженные на порту модели:
+                              {t.discoveredPortModels}
                             </span>
                             <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-thin">
                               {localPortConfig.discoveredModels.map((m) => {
@@ -754,14 +1020,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                           name: m.name,
                                           simpleName: m.name,
                                           provider: 'custom',
-                                          providerName: 'Локальный порт',
-                                          simpleProviderName: 'Локальный',
-                                          description: 'Модель с локального сервера',
+                                          providerName: t.customProviderName,
+                                          simpleProviderName: t.customSimpleProvider,
+                                          description: t.localServerModelDesc,
                                           enabled: true,
                                         })
                                       }
                                       className="p-1 text-neutral-400 hover:text-white rounded-lg transition-colors ml-2"
-                                      title="Индивидуальные настройки модели"
+                                      title={t.modelSettingsTooltip}
                                     >
                                       <SettingsIcon className="w-4 h-4" />
                                     </button>
@@ -778,7 +1044,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {/* Copy models to AppData toggle */}
                   <div className="flex items-center justify-between p-4 border rounded-xl bg-black/30 border-white/5">
                     <span className="text-xs font-medium text-neutral-300">
-                      Копировать выбранные модели на устройство в AppData
+                      {t.copyAppDataTitle}
                     </span>
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input
@@ -802,6 +1068,86 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </label>
                   </div>
 
+                  {/* Save data to External Root Storage toggle (Near Download / SD Card / CHATOX_Data) - visible on mobile or standalone */}
+                  {isMobileEnvironment && (
+                    <div
+                      className="p-4 border rounded-xl space-y-3 transition-all"
+                      style={{
+                        backgroundColor: `${accentColor}12`,
+                        borderColor: `${accentColor}40`,
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                            <FolderOpen className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                            {t.saveToExternalTitle}
+                          </span>
+                          <p className="text-[11px] text-neutral-400 mt-0.5">
+                            {t.saveToExternalDesc}
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
+                          <input
+                            type="checkbox"
+                            checked={settings.saveToExternalStorage !== false}
+                            onChange={(e) =>
+                              onUpdateSettings({ saveToExternalStorage: e.target.checked })
+                            }
+                            className="sr-only peer"
+                          />
+                          <div
+                            className="w-10 h-5 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"
+                            style={
+                              settings.saveToExternalStorage !== false
+                                ? {
+                                    backgroundColor: accentColor,
+                                  }
+                                : {}
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-white/10">
+                        <span className="text-[11px] text-neutral-400">
+                          {t.manualBackupLabel}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleCreateExternalBackup}
+                          disabled={isBackingUp}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-all disabled:opacity-50"
+                          style={{
+                            backgroundColor: `${accentColor}25`,
+                            borderColor: `${accentColor}50`,
+                            color: isLightColor(accentColor) ? '#ffffff' : accentColor,
+                          }}
+                        >
+                          <Save className={`w-3.5 h-3.5 ${isBackingUp ? 'animate-spin' : ''}`} />
+                          <span>{isBackingUp ? t.saving : t.makeBackup}</span>
+                        </button>
+                      </div>
+
+                      {backupStatus && (
+                        <div
+                          className={`text-[11px] px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 ${
+                            backupStatus.success
+                              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/30'
+                              : 'bg-rose-950/40 text-rose-300 border-rose-500/30'
+                          }`}
+                        >
+                          {backupStatus.success ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                          ) : (
+                            <Info className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                          )}
+                          <span>{backupStatus.message}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* SECTION: Custom Added Models List (Renaming and Management) */}
                   {settings.customModels.length > 0 && (
                     <div
@@ -816,7 +1162,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           className="text-xs font-bold uppercase tracking-wider"
                           style={{ color: accentColor }}
                         >
-                          Добавленные файлы моделей (Переименование)
+                          {t.addedModelFilesTitle}
                         </h4>
                         <span className="text-[11px] text-neutral-400">
                           {settings.customModels.length} шт.
@@ -928,7 +1274,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {/* Provider API Keys & Model selection */}
                   <div className="space-y-6">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-                      Провайдеры ИИ и Выбор Активных Моделей
+                      {t.providersSectionTitle}
                     </h4>
 
                     {PROVIDERS_LIST.map((provider) => {
@@ -972,15 +1318,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               {currentKey ? (
                                 <span className="text-[11px] text-emerald-400 flex items-center gap-1">
                                   <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Ключ указан</span>
+                                  <span>{t.keySpecified}</span>
                                 </span>
                               ) : provider.id === 'google' ? (
                                 <span className="text-[10px] text-amber-400/80">
-                                  Бесплатный ключ на aistudio.google.com
+                                  {t.freeKeyNotice}
                                 </span>
                               ) : (
                                 <span className="text-[10px] text-neutral-500">
-                                  Ключ не введен
+                                  {t.keyNotEntered}
                                 </span>
                               )}
                             </div>
@@ -994,7 +1340,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   type={isKeyVisible ? 'text' : 'password'}
                                   value={currentKey}
                                   onChange={(e) => handleApiKeyChange(provider.id, e.target.value)}
-                                  placeholder={`Введите API ключ для ${
+                                  placeholder={`${t.enterApiKeyFor} ${
                                     settings.customization.useSimpleNames
                                       ? provider.simpleName
                                       : provider.name
@@ -1023,10 +1369,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   borderColor: `${accentColor}50`,
                                   color: isLightColor(accentColor) ? '#ffffff' : accentColor,
                                 }}
-                                title="Проверить работоспособность ключа"
+                                title={t.testKey}
                               >
                                 <RefreshCw className={`w-3.5 h-3.5 ${testingProviderKey === provider.id ? 'animate-spin' : ''}`} />
-                                <span className="hidden sm:inline">Проверить</span>
+                                <span className="hidden sm:inline">{t.testKey}</span>
                               </button>
                             </div>
 
@@ -1047,12 +1393,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 <span>{providerTestResults[provider.id].message}</span>
                               </div>
                             )}
+
+                            {/* Google specific proxy/mirror quick status banner */}
+                            {provider.id === 'google' && (
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl border bg-black/50 border-white/10 text-xs">
+                                <div className="flex items-center gap-2">
+                                  <Globe className="w-4 h-4 text-emerald-400 shrink-0" />
+                                  <span className="text-neutral-300 text-[11px] sm:text-xs">
+                                    Режим сети для РФ:{' '}
+                                    <strong className="text-white font-semibold">
+                                      {settings.networkProxy?.mode === 'mirror'
+                                        ? '⚡ Встроенное зеркало (Без VPN/DNS)'
+                                        : settings.networkProxy?.mode === 'custom'
+                                        ? '🛠️ Пользовательский прокси'
+                                        : '🌐 Прямое (Нужен Xbox DNS или VPN)'}
+                                    </strong>
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveTab('network')}
+                                  className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors hover:bg-white/10 shrink-0 text-left sm:text-center"
+                                  style={{ borderColor: `${accentColor}60`, color: accentColor }}
+                                >
+                                  Настроить зеркало →
+                                </button>
+                              </div>
+                            )}
                           </div>
 
                           {/* Built-in default model list */}
                           <div className="space-y-2 pt-2">
                             <span className="text-[11px] text-neutral-400 font-medium block">
-                              Предустановленные модели:
+                              {t.presetModelsLabel}
                             </span>
                             <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-thin">
                               {provider.defaultModels.map((model) => {
@@ -1117,7 +1490,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           {discoveredForProvider.length > 0 && (
                             <div className="pt-2 border-t border-white/5 space-y-2">
                               <span className="text-[11px] font-medium block" style={{ color: accentColor }}>
-                                Обнаруженные через API модели (названия без описания):
+                                {t.discoveredApiModelsLabel}
                               </span>
                               <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
                                 {discoveredForProvider.map((m) => {
@@ -1182,15 +1555,467 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
 
-              {/* TAB 2: БЕЗОПАСНОСТЬ */}
+              {/* TAB 2: СЕТЬ И ЗЕРКАЛА (ОБХОД БЛОКИРОВОК В РФ) */}
+              {activeTab === 'network' && (
+                <div className="space-y-6">
+                  {/* Status Banner */}
+                  <div
+                    className="p-5 border rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                    style={{
+                      backgroundColor: `${accentColor}15`,
+                      borderColor: `${accentColor}50`,
+                      boxShadow: `0 0 30px ${accentColor}15`,
+                    }}
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div
+                        className="flex items-center justify-center w-11 h-11 rounded-2xl border shrink-0"
+                        style={{
+                          backgroundColor: `${accentColor}25`,
+                          borderColor: `${accentColor}60`,
+                          color: accentColor,
+                        }}
+                      >
+                        <Globe className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-base font-bold text-white">{t.networkModeHeader}</h4>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
+                            {t.rfSupportBadge}
+                          </span>
+                        </div>
+                        <p className="text-xs text-neutral-300 mt-1">
+                          {settings.networkProxy?.mode === 'mirror'
+                            ? t.mirrorActiveDesc
+                            : settings.networkProxy?.mode === 'custom'
+                            ? t.customActiveDesc
+                            : t.directActiveDesc}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleTestMirror}
+                      disabled={isTestingMirror}
+                      className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-xl transition-all border shadow-lg disabled:opacity-50 shrink-0"
+                      style={{
+                        backgroundColor: accentColor,
+                        borderColor: `${accentColor}80`,
+                        color: getContrastColor(accentColor),
+                        boxShadow: `0 0 20px ${accentColor}50`,
+                      }}
+                    >
+                      <Zap className={`w-4 h-4 ${isTestingMirror ? 'animate-spin' : ''}`} />
+                      <span>{isTestingMirror ? t.testingPing : t.testPing}</span>
+                    </button>
+                  </div>
+
+                  {/* Mirror Test Results Card (if tested) */}
+                  {mirrorTestResult && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                        mirrorTestResult.success
+                          ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                          : 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                      }`}
+                    >
+                      {mirrorTestResult.success ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                      ) : (
+                        <Info className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                      )}
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold">{mirrorTestResult.status}</span>
+                          {mirrorTestResult.latencyMs !== undefined && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 border border-white/10 font-mono">
+                              {mirrorTestResult.latencyMs} {t.pingMs}
+                            </span>
+                          )}
+                        </div>
+                        {mirrorTestResult.error && (
+                          <p className="text-xs text-rose-300/90 mt-1">{mirrorTestResult.error}</p>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Mode Selector Cards */}
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold uppercase tracking-wider text-neutral-400 block">
+                      {t.selectConnectionMode}
+                    </label>
+
+                    {/* Mode 1: Mirror */}
+                    <div
+                      onClick={() =>
+                        onUpdateSettings({
+                          networkProxy: {
+                            ...(settings.networkProxy || {
+                              customGoogleMirrorUrl: '',
+                              customProxyUrl: '',
+                              proxyAllProviders: false,
+                            }),
+                            mode: 'mirror',
+                          },
+                        })
+                      }
+                      className="p-4 sm:p-5 border rounded-2xl cursor-pointer transition-all space-y-2 relative"
+                      style={
+                        settings.networkProxy?.mode === 'mirror'
+                          ? {
+                              backgroundColor: `${accentColor}20`,
+                              borderColor: `${accentColor}80`,
+                              boxShadow: `0 0 25px ${accentColor}25`,
+                            }
+                          : {
+                              backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                              borderColor: 'rgba(255, 255, 255, 0.08)',
+                            }
+                      }
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-5 h-5 rounded-full border flex items-center justify-center shrink-0 mt-0.5"
+                            style={{
+                              borderColor: settings.networkProxy?.mode === 'mirror' ? accentColor : 'rgba(255,255,255,0.3)',
+                              backgroundColor: settings.networkProxy?.mode === 'mirror' ? accentColor : 'transparent',
+                            }}
+                          >
+                            {settings.networkProxy?.mode === 'mirror' && (
+                              <div className="w-2 h-2 rounded-full bg-white" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h5 className="text-sm font-bold text-white">{t.modeMirrorTitle}</h5>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
+                                {t.modeMirrorBadge}
+                              </span>
+                            </div>
+                            <p className="text-xs text-neutral-400 mt-1">
+                              {t.modeMirrorDesc}
+                            </p>
+                          </div>
+                        </div>
+                        <Zap className="w-5 h-5 shrink-0" style={{ color: accentColor }} />
+                      </div>
+
+                      <div className="pt-2 pl-8 text-[11px] text-neutral-400 flex flex-wrap gap-x-4 gap-y-1">
+                        <span className="flex items-center gap-1 text-emerald-400">
+                          <Check className="w-3.5 h-3.5" /> {t.modeMirrorFeature1}
+                        </span>
+                        <span className="flex items-center gap-1 text-emerald-400">
+                          <Check className="w-3.5 h-3.5" /> {t.modeMirrorFeature2}
+                        </span>
+                        <span className="flex items-center gap-1 text-neutral-300">
+                          • {t.modeMirrorFeature3}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Mode 2: Direct */}
+                    <div
+                      onClick={() =>
+                        onUpdateSettings({
+                          networkProxy: {
+                            ...(settings.networkProxy || {
+                              customGoogleMirrorUrl: '',
+                              customProxyUrl: '',
+                              proxyAllProviders: false,
+                            }),
+                            mode: 'direct',
+                          },
+                        })
+                      }
+                      className="p-4 sm:p-5 border rounded-2xl cursor-pointer transition-all space-y-2 relative"
+                      style={
+                        settings.networkProxy?.mode === 'direct'
+                          ? {
+                              backgroundColor: `${accentColor}20`,
+                              borderColor: `${accentColor}80`,
+                              boxShadow: `0 0 25px ${accentColor}25`,
+                            }
+                          : {
+                              backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                              borderColor: 'rgba(255, 255, 255, 0.08)',
+                            }
+                      }
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-5 h-5 rounded-full border flex items-center justify-center shrink-0 mt-0.5"
+                            style={{
+                              borderColor: settings.networkProxy?.mode === 'direct' ? accentColor : 'rgba(255,255,255,0.3)',
+                              backgroundColor: settings.networkProxy?.mode === 'direct' ? accentColor : 'transparent',
+                            }}
+                          >
+                            {settings.networkProxy?.mode === 'direct' && (
+                              <div className="w-2 h-2 rounded-full bg-white" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h5 className="text-sm font-bold text-white">{t.modeDirectTitle}</h5>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30">
+                                {t.modeDirectBadge}
+                              </span>
+                            </div>
+                            <p className="text-xs text-neutral-400 mt-1">
+                              {t.modeDirectDesc}
+                            </p>
+                          </div>
+                        </div>
+                        <Network className="w-5 h-5 shrink-0 text-neutral-400" />
+                      </div>
+                    </div>
+
+                    {/* Mode 3: Custom Mirror */}
+                    <div
+                      onClick={() =>
+                        onUpdateSettings({
+                          networkProxy: {
+                            ...(settings.networkProxy || {
+                              customGoogleMirrorUrl: '',
+                              customProxyUrl: '',
+                              proxyAllProviders: false,
+                            }),
+                            mode: 'custom',
+                          },
+                        })
+                      }
+                      className="p-4 sm:p-5 border rounded-2xl cursor-pointer transition-all space-y-3 relative"
+                      style={
+                        settings.networkProxy?.mode === 'custom'
+                          ? {
+                              backgroundColor: `${accentColor}20`,
+                              borderColor: `${accentColor}80`,
+                              boxShadow: `0 0 25px ${accentColor}25`,
+                            }
+                          : {
+                              backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                              borderColor: 'rgba(255, 255, 255, 0.08)',
+                            }
+                      }
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-5 h-5 rounded-full border flex items-center justify-center shrink-0 mt-0.5"
+                            style={{
+                              borderColor: settings.networkProxy?.mode === 'custom' ? accentColor : 'rgba(255,255,255,0.3)',
+                              backgroundColor: settings.networkProxy?.mode === 'custom' ? accentColor : 'transparent',
+                            }}
+                          >
+                            {settings.networkProxy?.mode === 'custom' && (
+                              <div className="w-2 h-2 rounded-full bg-white" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h5 className="text-sm font-bold text-white">{t.modeCustomTitle}</h5>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-semibold border border-blue-500/30">
+                                {t.modeCustomBadge}
+                              </span>
+                            </div>
+                            <p className="text-xs text-neutral-400 mt-1">
+                              {t.modeCustomDesc}
+                            </p>
+                          </div>
+                        </div>
+                        <Sliders className="w-5 h-5 shrink-0 text-neutral-400" />
+                      </div>
+
+                      {settings.networkProxy?.mode === 'custom' && (
+                        <div
+                          className="pt-2 pl-8 space-y-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <label className="text-[11px] text-neutral-300 font-medium block">
+                            {t.customMirrorUrlLabel}
+                          </label>
+                          <input
+                            type="url"
+                            value={settings.networkProxy?.customGoogleMirrorUrl || ''}
+                            onChange={(e) =>
+                              onUpdateSettings({
+                                networkProxy: {
+                                  ...(settings.networkProxy || {
+                                    mode: 'custom',
+                                    customProxyUrl: '',
+                                    proxyAllProviders: false,
+                                  }),
+                                  customGoogleMirrorUrl: e.target.value,
+                                },
+                              })
+                            }
+                            placeholder={t.customMirrorUrlPlaceholder}
+                            className="w-full px-3.5 py-2.5 bg-black/70 border border-white/15 rounded-xl text-white font-mono text-xs focus:outline-none"
+                            style={{ borderColor: accentColor }}
+                          />
+                          <span className="text-[10px] text-neutral-400 block">
+                            {t.customMirrorExample}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Extra: Proxy all providers toggle */}
+                  <div className="p-4 border rounded-2xl bg-black/40 border-white/10 flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-semibold text-white">{t.proxyAllProvidersTitle}</h4>
+                      <p className="text-[11px] text-neutral-400 mt-0.5">
+                        {t.proxyAllProvidersDesc}
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={settings.networkProxy?.proxyAllProviders ?? false}
+                        onChange={(e) =>
+                          onUpdateSettings({
+                            networkProxy: {
+                              ...(settings.networkProxy || {
+                                mode: 'mirror',
+                                customGoogleMirrorUrl: '',
+                                customProxyUrl: '',
+                              }),
+                              proxyAllProviders: e.target.checked,
+                            },
+                          })
+                        }
+                        className="sr-only peer"
+                      />
+                      <div
+                        className="w-10 h-5 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"
+                        style={
+                          settings.networkProxy?.proxyAllProviders
+                            ? {
+                                backgroundColor: accentColor,
+                              }
+                            : {}
+                        }
+                      />
+                    </label>
+                  </div>
+
+                  {/* Xbox DNS Helper accordion */}
+                  <div className="p-5 border rounded-2xl bg-black/40 border-white/10 space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowDnsHelp(!showDnsHelp)}
+                      className="w-full flex items-center justify-between text-left"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className="flex items-center justify-center w-8 h-8 rounded-xl border"
+                          style={{
+                            backgroundColor: `${accentColor}15`,
+                            borderColor: `${accentColor}40`,
+                            color: accentColor,
+                          }}
+                        >
+                          <HelpCircle className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs sm:text-sm font-bold text-white">
+                            {t.xboxDnsTitle}
+                          </h4>
+                          <p className="text-[11px] text-neutral-400">
+                            {t.xboxDnsDesc}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-xs text-neutral-400 font-semibold px-2 py-1 bg-white/5 rounded-lg">
+                        {showDnsHelp ? t.collapse : t.expand}
+                      </span>
+                    </button>
+
+                    {showDnsHelp && (
+                      <div className="pt-3 border-t border-white/10 space-y-3 text-xs text-neutral-300">
+                        <p className="text-[11px] text-neutral-300">
+                          {t.xboxDnsInstruction}
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {/* Primary DNS */}
+                          <div className="p-3 bg-black/60 border border-white/10 rounded-xl flex items-center justify-between">
+                            <div>
+                              <span className="text-[10px] text-neutral-400 block font-semibold">
+                                {t.primaryDns}
+                              </span>
+                              <span className="font-mono text-xs text-emerald-300 font-bold">
+                                178.22.122.100
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => handleCopyText('178.22.122.100', 'dns1')}
+                              className="px-2.5 py-1 text-[11px] bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center gap-1 transition-colors"
+                            >
+                              <Copy className="w-3 h-3" />
+                              <span>{copiedText === 'dns1' ? t.copied : t.copy}</span>
+                            </button>
+                          </div>
+
+                          {/* Secondary DNS */}
+                          <div className="p-3 bg-black/60 border border-white/10 rounded-xl flex items-center justify-between">
+                            <div>
+                              <span className="text-[10px] text-neutral-400 block font-semibold">
+                                {t.secondaryDns}
+                              </span>
+                              <span className="font-mono text-xs text-emerald-300 font-bold">
+                                185.51.200.2
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => handleCopyText('185.51.200.2', 'dns2')}
+                              className="px-2.5 py-1 text-[11px] bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center gap-1 transition-colors"
+                            >
+                              <Copy className="w-3 h-3" />
+                              <span>{copiedText === 'dns2' ? t.copied : t.copy}</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Android Private DNS */}
+                        <div className="p-3 bg-black/60 border border-white/10 rounded-xl flex items-center justify-between">
+                          <div>
+                            <span className="text-[10px] text-neutral-400 block font-semibold">
+                              {t.androidPrivateDns}
+                            </span>
+                            <span className="font-mono text-xs text-purple-300 font-bold">
+                              dns.xbox.dns-box.net
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => handleCopyText('dns.xbox.dns-box.net', 'dot')}
+                            className="px-2.5 py-1 text-[11px] bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center gap-1 transition-colors"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{copiedText === 'dot' ? t.copied : t.copy}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: БЕЗОПАСНОСТЬ */}
               {activeTab === 'security' && (
                 <div className="space-y-6">
                   {/* File Encryption switch */}
                   <div className="p-5 border rounded-2xl bg-black/40 border-white/10 flex items-center justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white">Шифрование файлов</h4>
+                      <h4 className="text-sm font-bold text-white">{t.encryptionTitle}</h4>
                       <p className="text-xs text-neutral-400 mt-0.5">
-                        Сквозное AES-256-GCM шифрование для всех сохраняемых файлов (имя, ключи, чаты)
+                        {t.encryptionDesc}
                       </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -1236,9 +2061,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <h4 className="text-sm font-bold text-white">Защита от переноса</h4>
+                        <h4 className="text-sm font-bold text-white">{t.transferProtectionTitle}</h4>
                         <p className="text-xs text-neutral-400 mt-0.5">
-                          Привязка к аппаратному ID устройства с блокировкой при копировании
+                          {t.transferProtectionDesc}
                         </p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
@@ -1274,7 +2099,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     {settings.security.transferProtection && (
                       <div className="pt-3 border-t border-white/10 space-y-2">
                         <label className="block text-xs font-semibold" style={{ color: accentColor }}>
-                          Мастер-пароль разблокировки
+                          {t.masterPasswordLabel}
                         </label>
                         <div className="relative">
                           <input
@@ -1290,7 +2115,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 },
                               });
                             }}
-                            placeholder="Введите мастер-пароль..."
+                            placeholder={t.masterPasswordPlaceholder}
                             className="w-full px-4 py-2.5 pr-12 bg-black/80 border rounded-xl text-white placeholder-neutral-600 text-sm focus:outline-none"
                             style={{ borderColor: `${accentColor}50` }}
                           />
@@ -1298,13 +2123,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             type="button"
                             onClick={handlePasswordEyeClick}
                             className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white transition-colors p-1"
-                            title="Показать пароль на 0.5 секунды"
+                            title={t.showPasswordTooltip}
                           >
                             <Eye className="w-4 h-4" />
                           </button>
                         </div>
                         <p className="text-[11px] text-neutral-400">
-                          При нажатии на значок глаза пароль отображается на 0.5 секунды.
+                          {t.showPasswordNotice}
                         </p>
                       </div>
                     )}
@@ -1321,13 +2146,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <Info className="w-5 h-5 shrink-0 mt-0.5" style={{ color: accentColor }} />
                     <div className="text-xs text-neutral-300 space-y-1">
                       <p className="font-semibold text-white">
-                        Памятка: Хранилище данных AppData / Local Encrypted Vault
+                        {t.vaultMemoTitle}
                       </p>
                       <p>
-                        Все ключи, чаты и настройки сохраняются в изолированном защищенном контейнере.
-                        Алгоритм AES-256-GCM с производным ключом через PBKDF2 (100,000 итераций).
+                        {t.vaultMemoDesc}
                       </p>
                     </div>
+                  </div>
+
+                  {/* Manual JSON Export / Import */}
+                  <div className="p-4 border rounded-2xl bg-black/40 border-white/10 flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold text-white">{t.manualExportTitle}</h4>
+                      <p className="text-[11px] text-neutral-400">
+                        {t.manualExportDesc}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rawChats = localStorage.getItem('chatox_chats_enc') || '[]';
+                        let chatsList: any[] = [];
+                        try {
+                          if (rawChats.trim().startsWith('[')) chatsList = JSON.parse(rawChats);
+                        } catch (e) {
+                          // ignore
+                        }
+                        exportManualBackupFile(settings, chatsList);
+                      }}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-xl border flex items-center gap-1.5 transition-all hover:bg-white/10"
+                      style={{
+                        borderColor: `${accentColor}50`,
+                        color: accentColor,
+                      }}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>{t.downloadJsonBtn}</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -1335,12 +2190,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {/* TAB 3: КАСТОМИЗАЦИЯ */}
               {activeTab === 'customization' && (
                 <div className="space-y-8">
+                  {/* Language Selection */}
+                  <div className="p-5 border rounded-2xl bg-black/40 border-white/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <Languages className="w-5 h-5" style={{ color: accentColor }} />
+                        <div>
+                          <h4 className="text-sm font-bold text-white">{t.languageSettingTitle}</h4>
+                          <p className="text-xs text-neutral-400 mt-0.5">
+                            {t.languageSettingDesc}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-white/10 text-white">
+                        {currentLanguage.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2.5 pt-1">
+                      {[
+                        { id: 'ru' as AppLanguage, name: 'Русский', flag: '🇷🇺' },
+                        { id: 'en' as AppLanguage, name: 'English', flag: '🇬🇧' },
+                        { id: 'zh' as AppLanguage, name: '简体中文', flag: '🇨🇳' },
+                      ].map((item) => {
+                        const isSelected = (settings.customization.language || 'ru') === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              onUpdateSettings({
+                                customization: {
+                                  ...settings.customization,
+                                  language: item.id,
+                                },
+                              });
+                            }}
+                            className="p-3 rounded-xl border flex items-center justify-center gap-2 transition-all font-medium text-xs sm:text-sm"
+                            style={
+                              isSelected
+                                ? {
+                                    backgroundColor: accentColor,
+                                    borderColor: `${accentColor}90`,
+                                    color: getContrastColor(accentColor),
+                                    boxShadow: `0 0 15px ${accentColor}50`,
+                                  }
+                                : {
+                                    backgroundColor: 'rgba(0,0,0,0.5)',
+                                    borderColor: 'rgba(255,255,255,0.1)',
+                                    color: '#d4d4d4',
+                                  }
+                            }
+                          >
+                            <span className="text-base">{item.flag}</span>
+                            <span>{item.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   {/* Simple Names switch */}
                   <div className="p-5 border rounded-2xl bg-black/40 border-white/10 flex items-center justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white">Простые названия</h4>
+                      <h4 className="text-sm font-bold text-white">{t.simpleNamesTitle}</h4>
                       <p className="text-xs text-neutral-400 mt-0.5">
-                        Заменять названия компаний на имена самих ИИ («Google» &rarr; «Gemini», «Anthropic» &rarr; «Claude», «xAI» &rarr; «Grok»)
+                        {t.simpleNamesDesc}
                       </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -1374,9 +2289,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {/* Background Mode Switch (Old vs New center/edges) */}
                   <div className="p-5 border rounded-2xl bg-black/40 border-white/10 flex items-center justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white">Классический фон (старый режим свечения)</h4>
+                      <h4 className="text-sm font-bold text-white">{t.classicBgTitle}</h4>
                       <p className="text-xs text-neutral-400 mt-0.5">
-                        Переключение со старым режимом фона (две зоны) на фокус центра (акцент) и краев (основной)
+                        {t.classicBgDesc}
                       </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -1411,9 +2326,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="p-5 border rounded-2xl bg-black/40 border-white/10 space-y-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h4 className="text-sm font-bold text-white">Интенсивность фонового свечения</h4>
+                        <h4 className="text-sm font-bold text-white">{t.glowIntensityTitle}</h4>
                         <p className="text-xs text-neutral-400 mt-0.5">
-                          Настройка яркости неоновых переливов на заднем плане (от 20% до 100%)
+                          {t.glowIntensityDesc}
                         </p>
                       </div>
                       <span className="text-xs font-mono font-bold" style={{ color: accentColor }}>
@@ -1444,7 +2359,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       className="block mb-2 text-xs font-bold uppercase tracking-wider"
                       style={{ color: accentColor }}
                     >
-                      Имя пользователя для приветствия
+                      {t.userNameLabel}
                     </label>
                     <input
                       type="text"
@@ -1461,7 +2376,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           },
                         })
                       }
-                      placeholder="Оставьте пустым или введите имя (например: Алекс)"
+                      placeholder={t.userNamePlaceholder}
                       className="w-full px-4 py-2.5 bg-black/70 border rounded-xl text-white placeholder-neutral-500 text-sm focus:outline-none"
                       style={{ borderColor: `${accentColor}40` }}
                     />
@@ -1471,7 +2386,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-300">
-                        Основной цвет темы (Применяется ко всему интерфейсу)
+                        {t.primaryThemeColorTitle}
                       </h4>
                       <span className="text-xs font-mono font-bold" style={{ color: accentColor }}>
                         {settings.customization.primaryColor}
@@ -1528,7 +2443,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="w-9 h-9 rounded-lg border border-white/20 cursor-pointer bg-transparent"
                       />
                       <div>
-                        <span className="text-xs font-semibold text-white">Выбрать свой цвет (RGB)</span>
+                        <span className="text-xs font-semibold text-white">{t.chooseCustomColorRgb}</span>
                         <p className="text-[11px] font-mono text-neutral-400">{customPrimaryHex}</p>
                       </div>
                     </div>
@@ -1538,7 +2453,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-300">
-                        Акцентный цвет
+                        {t.accentThemeColorTitle}
                       </h4>
                       <span className="text-xs font-mono font-bold" style={{ color: settings.customization.accentColor }}>
                         {settings.customization.accentColor}
@@ -1595,7 +2510,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="w-9 h-9 rounded-lg border border-white/20 cursor-pointer bg-transparent"
                       />
                       <div>
-                        <span className="text-xs font-semibold text-white">Выбрать свой акцент (RGB)</span>
+                        <span className="text-xs font-semibold text-white">{t.chooseCustomAccentRgb}</span>
                         <p className="text-[11px] font-mono text-neutral-400">{customAccentHex}</p>
                       </div>
                     </div>
@@ -1604,7 +2519,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {/* Fonts selection */}
                   <div className="space-y-3">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-300">
-                      Шрифт интерфейса
+                      {t.interfaceFontTitle}
                     </h4>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1668,7 +2583,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         }}
                       >
                         <Upload className="w-4 h-4" />
-                        <span>Загрузить свой шрифт (.ttf / .otf)</span>
+                        <span>{t.uploadCustomFontBtn}</span>
                       </button>
                     </div>
                   </div>

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { X, Settings, RotateCcw, Check, Sparkles, Sliders } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ModelOption, ModelCustomConfig } from '../types';
+import { ModelOption, ModelCustomConfig, AppLanguage } from '../types';
 import { getContrastColor } from '../utils/color';
+import { getTranslation } from '../i18n/translations';
 
 interface ModelSettingsModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface ModelSettingsModalProps {
   config: ModelCustomConfig | undefined;
   onSaveConfig: (modelId: string, newConfig: ModelCustomConfig) => void;
   accentColor?: string;
+  language?: AppLanguage;
 }
 
 export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
@@ -20,7 +22,9 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
   config,
   onSaveConfig,
   accentColor = '#8a2be2',
+  language = 'ru',
 }) => {
+  const t = getTranslation(language);
   const [displayName, setDisplayName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [temperature, setTemperature] = useState<number>(0.7);
@@ -87,7 +91,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-white">Параметры модели</h3>
+                  <h3 className="text-base font-bold text-white">{t.modelParamsTitle}</h3>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-900/60 border border-purple-500/30 text-purple-300">
                     {model.providerName}
                   </span>
@@ -98,6 +102,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
             <button
               onClick={onClose}
               className="flex items-center justify-center w-8 h-8 text-neutral-400 transition-colors border rounded-xl border-white/10 hover:bg-white/10 hover:text-white"
+              title={t.doneClose}
             >
               <X className="w-4 h-4" />
             </button>
@@ -108,7 +113,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
             {/* Display Name / Rename */}
             <div className="p-4 border rounded-2xl bg-black/40 border-white/10 space-y-1.5">
               <label className="block text-xs font-semibold text-neutral-300">
-                Отображаемое название (Переименовать модель)
+                {t.displayNameLabel}
               </label>
               <input
                 type="text"
@@ -123,15 +128,15 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
             <div className="p-4 border rounded-2xl bg-purple-950/20 border-purple-500/30 space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold tracking-wider uppercase text-purple-300">
-                  Индивидуальный системный промпт
+                  {t.systemPromptLabel}
                 </label>
-                <span className="text-[10px] text-purple-400">Только для этой модели</span>
+                <span className="text-[10px] text-purple-400">{t.systemPromptBadge}</span>
               </div>
               <textarea
                 rows={3}
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
-                placeholder="Индивидуальная инструкция для этой модели (переопределяет глобальный промпт)..."
+                placeholder={t.systemPromptPlaceholder}
                 className="w-full px-3.5 py-2.5 bg-black/60 border border-purple-500/30 rounded-xl text-white placeholder-neutral-500 text-xs focus:outline-none focus:border-purple-400"
               />
             </div>
@@ -141,10 +146,10 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-xs font-semibold text-neutral-200">
-                    Температура (Креативность)
+                    {t.temperatureLabel}
                   </span>
                   <p className="text-[11px] text-neutral-400">
-                    0.0 — точные факты и код, 1.0+ — творческие ответы
+                    {t.temperatureDesc}
                   </p>
                 </div>
                 <span className="text-xs font-mono px-2 py-0.5 rounded bg-purple-950/60 border border-purple-500/30 text-purple-300">
@@ -166,10 +171,10 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-xs font-semibold text-neutral-200">
-                    Максимум токенов ответа (Max Tokens)
+                    {t.maxTokensLabel}
                   </span>
                   <p className="text-[11px] text-neutral-400">
-                    Лимит длины ответа нейросети
+                    256 — 16384 tokens
                   </p>
                 </div>
                 <span className="text-xs font-mono px-2 py-0.5 rounded bg-purple-950/60 border border-purple-500/30 text-purple-300">
@@ -190,9 +195,9 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
             <div className="p-4 border rounded-2xl bg-black/40 border-white/10 space-y-2">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-semibold text-neutral-200">Top-P (Сэмплирование)</span>
+                  <span className="text-xs font-semibold text-neutral-200">{t.topPLabel}</span>
                   <p className="text-[11px] text-neutral-400">
-                    Порог вероятностной выборки слов
+                    0.10 — 1.00
                   </p>
                 </div>
                 <span className="text-xs font-mono px-2 py-0.5 rounded bg-purple-950/60 border border-purple-500/30 text-purple-300">
@@ -217,7 +222,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition-colors"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Сбросить к умолчанию</span>
+              <span>{t.resetDefaults}</span>
             </button>
 
             <div className="flex items-center gap-2">
@@ -225,7 +230,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
                 onClick={onClose}
                 className="px-4 py-2 text-xs font-semibold text-neutral-400 hover:text-white rounded-xl transition-colors"
               >
-                Отмена
+                {t.doneClose}
               </button>
               <button
                 onClick={handleSave}
@@ -238,7 +243,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
                 }}
               >
                 {isSaved ? <Check className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                <span>{isSaved ? 'Сохранено!' : 'Сохранить настройки'}</span>
+                <span>{isSaved ? t.saved : t.saveParameters}</span>
               </button>
             </div>
           </div>

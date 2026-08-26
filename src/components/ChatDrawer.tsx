@@ -11,8 +11,9 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChatSession } from '../types';
+import { ChatSession, AppLanguage } from '../types';
 import { getContrastColor } from '../utils/color';
+import { getTranslation } from '../i18n/translations';
 
 interface ChatDrawerProps {
   isOpen: boolean;
@@ -26,6 +27,7 @@ interface ChatDrawerProps {
   maxSavedChats: number;
   isEncrypted: boolean;
   accentColor: string;
+  language?: AppLanguage;
 }
 
 export const ChatDrawer: React.FC<ChatDrawerProps> = ({
@@ -40,7 +42,9 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
   maxSavedChats,
   isEncrypted,
   accentColor,
+  language = 'ru',
 }) => {
+  const t = getTranslation(language);
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredChats = chats.filter((c) =>
@@ -87,9 +91,11 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
                   <MessageSquare className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Сохраненные чаты</h3>
+                  <h3 className="text-sm font-bold text-white">{t.savedChatsTitle}</h3>
                   <div className="flex items-center gap-1.5 text-[11px] text-neutral-400">
-                    <span>{chats.length} из {maxSavedChats} слотов</span>
+                    <span>
+                      {chats.length} {t.slotsOf} {maxSavedChats} {t.slotsSuffix}
+                    </span>
                     {isEncrypted && (
                       <span className="flex items-center gap-0.5 font-mono" style={{ color: accentColor }}>
                         <Lock className="w-3 h-3" /> AES-256
@@ -124,7 +130,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
               }}
             >
               <Plus className="w-4 h-4" />
-              <span>Новый чат</span>
+              <span>{t.newChat}</span>
             </button>
 
             {/* Search chats */}
@@ -135,7 +141,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Поиск по сохраненным диалогам..."
+                placeholder={t.searchChatsPlaceholder}
                 className="w-full pl-9 pr-3 py-2 bg-black/60 border rounded-xl text-white placeholder-neutral-500 text-xs focus:outline-none"
                 style={{
                   borderColor: `${accentColor}40`,
@@ -148,9 +154,9 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
               {filteredChats.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-48 text-neutral-500 text-xs text-center px-4">
                   <MessageSquare className="w-8 h-8 mb-2 opacity-30" />
-                  <p>Нет сохраненных чатов</p>
+                  <p>{t.noSavedChats}</p>
                   <p className="text-[11px] text-neutral-600 mt-1">
-                    Начните диалог, и он автоматически зашифруется в хранилище
+                    {t.noSavedChatsSub}
                   </p>
                 </div>
               ) : (
@@ -184,10 +190,10 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
                         />
                         <div className="min-w-0">
                           <h4 className="text-xs font-semibold text-white truncate">
-                            {chat.title || 'Новый чат'}
+                            {chat.title || t.newChat}
                           </h4>
                           <div className="flex items-center gap-2 mt-0.5 text-[10px] text-neutral-400">
-                            <span>{chat.messages.length} сообщ.</span>
+                            <span>{chat.messages.length} {t.messagesCount}</span>
                             <span>&bull;</span>
                             <span>
                               {new Date(chat.updatedAt).toLocaleDateString([], {
@@ -207,7 +213,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
                             onExportChat(chat.id);
                           }}
                           className="p-1 text-neutral-400 hover:text-white rounded hover:bg-white/10"
-                          title="Экспорт чата в .json / .txt"
+                          title={t.exportChat}
                         >
                           <Download className="w-3.5 h-3.5" />
                         </button>
@@ -217,7 +223,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
                             onDeleteChat(chat.id);
                           }}
                           className="p-1 text-neutral-400 hover:text-red-400 rounded hover:bg-white/10"
-                          title="Удалить чат"
+                          title={t.deleteChatTooltip}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

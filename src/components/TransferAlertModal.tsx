@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, Lock, KeyRound, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { AppLanguage } from '../types';
+import { getTranslation } from '../i18n/translations';
 
 interface TransferAlertModalProps {
   isOpen: boolean;
   onVerifyPassword: (password: string) => boolean;
   onSuccess: () => void;
   accentColor: string;
+  language?: AppLanguage;
 }
 
 export const TransferAlertModal: React.FC<TransferAlertModalProps> = ({
@@ -14,7 +17,9 @@ export const TransferAlertModal: React.FC<TransferAlertModalProps> = ({
   onVerifyPassword,
   onSuccess,
   accentColor,
+  language = 'ru',
 }) => {
+  const t = getTranslation(language);
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -46,7 +51,7 @@ export const TransferAlertModal: React.FC<TransferAlertModalProps> = ({
     if (lockoutTimeRemaining && lockoutTimeRemaining > 0) return;
 
     if (!password) {
-      setErrorMsg('Введите пароль безопасности');
+      setErrorMsg(t.transferPasswordPlaceholder);
       return;
     }
 
@@ -62,9 +67,9 @@ export const TransferAlertModal: React.FC<TransferAlertModalProps> = ({
 
       if (nextCount >= 3) {
         setLockoutTimeRemaining(300); // 5 minutes (300 seconds)
-        setErrorMsg('Слишком много неверных попыток. Подождите 5 минут');
+        setErrorMsg(t.transferTooManyAttempts);
       } else {
-        setErrorMsg(`Неверный пароль. Осталось попыток: ${3 - nextCount}`);
+        setErrorMsg(`${t.transferInvalidPassword} ${3 - nextCount}`);
       }
     }
   };
@@ -97,22 +102,22 @@ export const TransferAlertModal: React.FC<TransferAlertModalProps> = ({
             </div>
             <div>
               <span className="text-xs font-bold tracking-widest text-red-400 uppercase">
-                Защита от переноса данных
+                {t.transferAlertHeader}
               </span>
-              <h2 className="text-xl font-bold text-white">Файлы с данными были перенесены</h2>
+              <h2 className="text-xl font-bold text-white">{t.transferAlertTitle}</h2>
             </div>
           </div>
 
           <div className="p-4 mb-6 border rounded-2xl bg-red-950/20 border-red-500/30 text-neutral-200">
             <p className="text-sm leading-relaxed">
-              Ой-ёй! Кажется, файл с важными данными был перенесён на другое хранилище! Пожалуйста, введите пароль или удалите файл с данными из папки AppData.
+              {t.transferAlertDesc}
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block mb-2 text-xs font-semibold tracking-wide uppercase text-neutral-400">
-                Пароль расшифровки
+                {t.transferPasswordLabel}
               </label>
               <div className="relative">
                 <input
@@ -121,7 +126,7 @@ export const TransferAlertModal: React.FC<TransferAlertModalProps> = ({
                   value={password}
                   disabled={isLocked}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={isLocked ? 'Ввод заблокирован' : 'Введите установленный пароль...'}
+                  placeholder={isLocked ? 'Locked' : t.transferPasswordPlaceholder}
                   className="w-full px-4 py-3.5 bg-black/70 border border-neutral-700 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <Lock className="absolute w-5 h-5 -translate-y-1/2 right-3.5 top-1/2 text-neutral-500" />
@@ -142,13 +147,13 @@ export const TransferAlertModal: React.FC<TransferAlertModalProps> = ({
             )}
 
             <button
-              id="transfer-confirm-btn"
+              id="transfer-submit-btn"
               type="submit"
               disabled={isLocked}
-              className="w-full flex items-center justify-center gap-2 py-3.5 font-semibold text-white transition-all rounded-xl bg-gradient-to-r from-red-600 to-purple-600 hover:from-red-500 hover:to-purple-500 shadow-[0_0_30px_rgba(239,68,68,0.5)] disabled:opacity-40 disabled:cursor-not-allowed"
+              className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-[0_0_20px_rgba(239,68,68,0.5)] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
               <KeyRound className="w-4 h-4" />
-              <span>Подтвердить пароль доступа</span>
+              <span>{t.transferUnlockBtn}</span>
             </button>
           </form>
         </motion.div>

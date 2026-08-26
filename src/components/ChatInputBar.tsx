@@ -14,9 +14,10 @@ import {
   Zap,
   Sliders,
 } from 'lucide-react';
-import { ModelOption, Attachment } from '../types';
+import { ModelOption, Attachment, AppLanguage } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { getContrastColor } from '../utils/color';
+import { getTranslation } from '../i18n/translations';
 
 interface ChatInputBarProps {
   inputText: string;
@@ -34,6 +35,7 @@ interface ChatInputBarProps {
   useSimpleNames: boolean;
   accentColor: string;
   onOpenSettings?: () => void;
+  language?: AppLanguage;
 }
 
 export const ChatInputBar: React.FC<ChatInputBarProps> = ({
@@ -52,7 +54,9 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   useSimpleNames,
   accentColor,
   onOpenSettings,
+  language = 'ru',
 }) => {
+  const t = getTranslation(language);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -72,7 +76,6 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   }, [isModelPickerOpen]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // If the user is currently using an IME (Input Method Editor) to switch layout or compose characters, do not intercept
     if (e.nativeEvent.isComposing || e.keyCode === 229) {
       return;
     }
@@ -193,7 +196,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
                       type="text"
                       value={modelSearch}
                       onChange={(e) => setModelSearch(e.target.value)}
-                      placeholder="Поиск по активным моделям..."
+                      placeholder={t.searchActiveModels}
                       className="w-full pl-9 pr-3 py-2 bg-black/60 border rounded-xl text-white placeholder-neutral-500 text-xs focus:outline-none"
                       style={{
                         borderColor: `${accentColor}40`,
@@ -207,7 +210,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
                 <div className="flex-1 overflow-y-auto p-2 space-y-1 max-h-[300px] scrollbar-thin">
                   {filteredModels.length === 0 ? (
                     <div className="py-8 text-center text-xs text-neutral-400">
-                      Модели по запросу не найдены
+                      {t.noModelsFound}
                     </div>
                   ) : (
                     filteredModels.map((m) => {
@@ -283,7 +286,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
                 {onOpenSettings && (
                   <div className="p-2.5 border-t border-white/10 bg-black/40 flex items-center justify-between">
                     <span className="text-[11px] text-neutral-400">
-                      Активно моделей: {availableModels.length}
+                      {t.activeModelsCount}{availableModels.length}
                     </span>
                     <button
                       onClick={() => {
@@ -297,7 +300,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
                       }}
                     >
                       <Sliders className="w-3 h-3" style={{ color: accentColor }} />
-                      <span>Управление моделями</span>
+                      <span>{t.manageModels}</span>
                     </button>
                   </div>
                 )}
@@ -308,7 +311,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
 
         {/* Available model count badge */}
         <span className="text-[11px] text-neutral-400 hidden sm:inline-block">
-          Моделей доступно: {availableModels.length}
+          {t.modelsAvailableCount}{availableModels.length}
         </span>
       </div>
 
@@ -371,7 +374,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
               ? 'bg-red-600 text-white border-red-400 shadow-[0_0_20px_rgba(239,68,68,0.8)] animate-pulse'
               : 'bg-black/40 text-neutral-300 border-white/10 hover:text-white hover:bg-white/10'
           }`}
-          title={isListening ? 'Идет голосовой ввод (нажмите для остановки)' : 'Голосовой ввод (распознавание речи)'}
+          title={isListening ? t.voiceListeningTooltip : t.voiceInputTooltip}
         >
           <Mic className="w-5 h-5" />
         </button>
@@ -382,7 +385,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
           type="button"
           onClick={() => fileInputRef.current?.click()}
           className="flex items-center justify-center w-10 h-10 rounded-xl bg-black/40 text-neutral-300 border border-white/10 hover:text-white hover:bg-white/10 transition-all shrink-0"
-          title="Загрузка файла к запросу"
+          title={t.fileUploadTooltip}
         >
           <Paperclip className="w-5 h-5" />
         </button>
@@ -398,8 +401,8 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
           autoCapitalize="sentences"
           autoCorrect="on"
           spellCheck={true}
-          lang="ru"
-          placeholder="Введите сообщение для нейросети..."
+          lang={language}
+          placeholder={t.inputPlaceholder}
           className="flex-1 bg-transparent text-white placeholder-neutral-500 text-sm md:text-base px-2 py-2 resize-none max-h-32 focus:outline-none scrollbar-thin"
         />
 
@@ -416,7 +419,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             color: getContrastColor(accentColor),
             boxShadow: `0 0 25px ${accentColor}80`,
           }}
-          title="Отправить сообщение"
+          title={t.sendMessageTooltip}
         >
           <Send className="w-5 h-5 ml-0.5" />
         </button>
@@ -424,4 +427,3 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     </div>
   );
 };
-

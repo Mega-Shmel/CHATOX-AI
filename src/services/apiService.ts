@@ -4,6 +4,7 @@ import {
   DiscoveredModel,
   LocalPortConfig,
   ModelCustomConfig,
+  NetworkProxyConfig,
   ProviderId,
 } from '../types';
 import { PROVIDERS_LIST } from '../data/defaultModels';
@@ -16,6 +17,7 @@ export interface ChatStreamParams {
   modelConfig?: ModelCustomConfig;
   localPortConfig?: LocalPortConfig;
   apiKeys: Record<string, string>;
+  networkProxy?: NetworkProxyConfig;
   attachments?: Attachment[];
   onChunk: (text: string) => void;
   onError: (error: string) => void;
@@ -54,6 +56,25 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
 };
 
 /**
+ * Maps model ID to valid API endpoint model names.
+ */
+function resolveGoogleModel(modelId: string): string {
+  return modelId.replace(/^models\//, '').trim();
+}
+
+/**
+ * Checks if the current runtime environment is a mobile native app (Capacitor/Cordova)
+ */
+export function isNativeMobile(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    !!(window as any).Capacitor?.isNativePlatform?.() ||
+    window.location.protocol === 'capacitor:' ||
+    (window.location.hostname === 'localhost' && !window.location.port)
+  );
+}
+
+/**
  * Generates an informative, formatted warning when an API key is missing.
  */
 function getMissingKeyMessage(provider: ProviderId, modelId: string): string {
@@ -63,9 +84,9 @@ function getMissingKeyMessage(provider: ProviderId, modelId: string): string {
 
 /**
  * Unified stream execution:
- * 1. Checks if API key is provided for non-local models.
- * 2. Attempts backend `/api/chat` if available.
- * 3. Falls back smoothly to Direct Client-side API execution (essential for Android APK / Capacitor / Standalone).
+ * 1. Validates API Key.
+ * 2. On web with Node backend: tries `/api/chat` SSE stream.
+ * 3. On Mobile Android / Standalone / Direct: directly executes via HTTPS REST API with robust SSE parsing and fallback.
  */
 export async function sendChatMessageStream(params: ChatStreamParams): Promise<void> {
   const {
@@ -94,76 +115,95 @@ export async function sendChatMessageStream(params: ChatStreamParams): Promise<v
     }
   }
 
-  // 2. Try server route first (if running with live node backend)
-  let triedServer = false;
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
+  // 2. Try Node backend route ONLY if NOT running in native mobile Android/Capacitor
+  if (!isNativeMobile()) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-    const serverRes = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        modelId,
-        provider,
-        messages,
-        systemPrompt: effectiveSystemPrompt,
-        modelConfig,
-        localPortConfig,
-        apiKeys,
-        attachments,
-      }),
-      signal: controller.signal,
-    }).catch(() => null);
+      const serverRes = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          modelId,
+          provider,
+          messages,
+          systemPrompt: effectiveSystemPrompt,
+          modelConfig,
+          localPortConfig,
+          apiKeys,
+          attachments,
+        }),
+        signal: controller.signal,
+      }).catch(() => null);
 
-    clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
 
-    if (serverRes && serverRes.ok && serverRes.body) {
-      triedServer = true;
-      const reader = serverRes.body.getReader();
-      const decoder = new TextDecoder('utf-8');
+      const contentType = serverRes?.headers.get('content-type') || '';
+      // Only proceed with server response if it returned actual SSE stream
+      if (serverRes && serverRes.ok && serverRes.body && contentType.includes('text/event-stream')) {
+        const reader = serverRes.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let hasReceivedAnyText = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const parsed = JSON.parse(line.substring(6));
-              if (parsed.error) {
-                onError(parsed.error);
-                return;
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ')) {
+              try {
+                const parsed = JSON.parse(trimmed.substring(6));
+                if (parsed.error) {
+                  onError(parsed.error);
+                  return;
+                }
+                if (parsed.text) {
+                  hasReceivedAnyText = true;
+                  onChunk(parsed.text);
+                }
+                if (parsed.done) {
+                  onDone();
+                  return;
+                }
+              } catch (e) {
+                // ignore SSE parse chunk
               }
-              if (parsed.text) {
-                onChunk(parsed.text);
-              }
-              if (parsed.done) {
-                onDone();
-                return;
-              }
-            } catch (e) {
-              // ignore parse errors on partial lines
             }
           }
         }
+
+        if (hasReceivedAnyText) {
+          onDone();
+          return;
+        }
       }
-      onDone();
-      return;
+    } catch (e) {
+      // Continue to direct client-side fallback below
     }
-  } catch (e) {
-    // Server not available, continue to Direct Client-side fallback
   }
 
-  // 3. Direct Client-side Execution (Capacitor / Android / Desktop / Direct Browser)
+  // 3. Direct Client-side Execution (Essential for Android APK / Capacitor / Standalone)
   try {
-    // === 3A. Google Gemini Direct REST SSE ===
+    const proxyMode = params.networkProxy?.mode || 'mirror';
+    const customGoogleUrl = params.networkProxy?.customGoogleMirrorUrl?.trim();
+
+    // === 3A. Google Gemini Direct / Mirror REST ===
     if (provider === 'google' || modelId.startsWith('gemini')) {
-      const cleanModel = modelId.replace(/^models\//, '');
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
+      const resolvedModel = resolveGoogleModel(modelId);
+      let baseUrl = 'https://generativelanguage.googleapis.com';
+
+      if (proxyMode === 'custom' && customGoogleUrl) {
+        baseUrl = customGoogleUrl.replace(/\/+$/, '');
+      }
+
+      const url = `${baseUrl}/v1beta/models/${resolvedModel}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
 
       const contents = (messages || []).map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
@@ -209,45 +249,172 @@ export async function sendChatMessageStream(params: ChatStreamParams): Promise<v
         bodyPayload.generationConfig = generationConfig;
       }
 
-      const geminiRes = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyPayload),
-      });
+      // If mirror mode on web, also attempt /api/proxy/google
+      if (proxyMode === 'mirror') {
+        try {
+          const proxyRes = await fetch('/api/proxy/google', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: resolvedModel,
+              apiKey,
+              body: bodyPayload,
+              isStream: true,
+            }),
+          }).catch(() => null);
 
-      if (!geminiRes.ok) {
-        const errJson = await geminiRes.json().catch(() => ({}));
-        const errMsg = (errJson as any)?.error?.message || `Google API HTTP ${geminiRes.status}: ${geminiRes.statusText}`;
-        onError(`Ошибка Google Gemini: ${errMsg}`);
+          if (proxyRes && proxyRes.ok && proxyRes.body) {
+            const reader = proxyRes.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+            let hasReceived = false;
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('data: ')) {
+                  try {
+                    const parsed = JSON.parse(trimmed.substring(6));
+                    if (parsed.error) {
+                      onError(parsed.error);
+                      return;
+                    }
+                    const candidates = parsed?.candidates || [];
+                    for (const candidate of candidates) {
+                      const parts = candidate?.content?.parts || [];
+                      for (const part of parts) {
+                        if (part.text) {
+                          hasReceived = true;
+                          onChunk(part.text);
+                        }
+                      }
+                    }
+                    if (parsed.done) {
+                      onDone();
+                      return;
+                    }
+                  } catch (e) {
+                    // ignore partial json
+                  }
+                }
+              }
+            }
+
+            if (hasReceived) {
+              onDone();
+              return;
+            }
+          }
+        } catch (e) {
+          // fallback to direct REST
+        }
+      }
+
+      let geminiRes: Response | null = null;
+      try {
+        geminiRes = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyPayload),
+        });
+      } catch (fetchErr: any) {
+        onError(`⚠️ Не удалось связаться с серверами Google API (${fetchErr?.message || 'Сеть недоступна'}). Если вы находитесь в РФ, переключите режим на «Встроенное зеркало» в Настройках ⚙️ -> «Сеть и Зеркало» или включите VPN / Xbox DNS.`);
         return;
       }
 
+      // If model not found (e.g. 404), fallback to widely available Gemini models
+      if (!geminiRes.ok && (geminiRes.status === 404 || geminiRes.status === 400)) {
+        const fallbacks = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash'];
+        for (const fb of fallbacks) {
+          if (fb === resolvedModel) continue;
+          const fallbackUrl = `${baseUrl}/v1beta/models/${fb}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
+          const fallbackRes = await fetch(fallbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(bodyPayload),
+          }).catch(() => null);
+
+          if (fallbackRes && fallbackRes.ok) {
+            geminiRes = fallbackRes;
+            break;
+          }
+        }
+      }
+
+      if (!geminiRes || !geminiRes.ok) {
+        const errJson = await geminiRes?.json().catch(() => ({}));
+        const errMsg = (errJson as any)?.error?.message || (geminiRes ? `Google API HTTP ${geminiRes.status}: ${geminiRes.statusText}` : 'Ошибка соединения');
+        
+        const isGeoBlocked = errMsg.toLowerCase().includes('location') || errMsg.toLowerCase().includes('unsupported') || errMsg.toLowerCase().includes('region');
+        if (isGeoBlocked) {
+          onError(`⚠️ Геоблокировка Google API в вашем регионе (${errMsg}). Решение: откройте Настройки ⚙️ -> «Сеть и Зеркало» и выберите режим «Встроенное зеркало (РФ без VPN)» или активируйте Xbox DNS / VPN.`);
+        } else {
+          onError(`Ошибка Google Gemini: ${errMsg}`);
+        }
+        return;
+      }
+
+      let hasText = false;
       if (geminiRes.body) {
         const reader = geminiRes.body.getReader();
         const decoder = new TextDecoder('utf-8');
+        let buffer = '';
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
           for (const line of lines) {
-            if (line.startsWith('data: ')) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ')) {
               try {
-                const parsed = JSON.parse(line.substring(6));
-                const textPart = parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (textPart) {
-                  onChunk(textPart);
+                const parsed = JSON.parse(trimmed.substring(6));
+                const candidates = parsed?.candidates || [];
+                for (const candidate of candidates) {
+                  const parts = candidate?.content?.parts || [];
+                  for (const part of parts) {
+                    if (part.text) {
+                      hasText = true;
+                      onChunk(part.text);
+                    }
+                  }
                 }
               } catch (e) {
-                // ignore SSE parse chunk
+                // ignore partial JSON
               }
             }
           }
         }
       }
+
+      // If stream didn't produce text, fallback to non-stream REST
+      if (!hasText) {
+        const nonStreamUrl = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const nonStreamRes = await fetch(nonStreamUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyPayload),
+        });
+        if (nonStreamRes.ok) {
+          const data: any = await nonStreamRes.json();
+          const parts = data?.candidates?.[0]?.content?.parts || [];
+          for (const p of parts) {
+            if (p.text) onChunk(p.text);
+          }
+        }
+      }
+
       onDone();
       return;
     }
@@ -412,17 +579,20 @@ export async function sendChatMessageStream(params: ChatStreamParams): Promise<v
     if (res.body) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder('utf-8');
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.substring(6).trim();
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data: ')) {
+            const dataStr = trimmed.substring(6).trim();
             if (dataStr === '[DONE]') {
               onDone();
               return;
@@ -468,26 +638,29 @@ export async function discoverProviderModels(
     };
   }
 
-  // 1. Try server first
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
+  // 1. Try server first (only if on web with active server)
+  if (!isNativeMobile()) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
 
-    const sRes = await fetch('/api/models/discover', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, apiKey: trimmedKey }),
-      signal: controller.signal,
-    }).catch(() => null);
+      const sRes = await fetch('/api/models/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, apiKey: trimmedKey }),
+        signal: controller.signal,
+      }).catch(() => null);
 
-    clearTimeout(timeout);
+      clearTimeout(timeout);
 
-    if (sRes && sRes.ok) {
-      const data = await sRes.json();
-      return data;
+      const contentType = sRes?.headers.get('content-type') || '';
+      if (sRes && sRes.ok && contentType.includes('application/json')) {
+        const data = await sRes.json();
+        return data;
+      }
+    } catch (e) {
+      // Continue to direct client check
     }
-  } catch (e) {
-    // Continue to direct client check
   }
 
   // 2. Direct client verification
@@ -653,4 +826,76 @@ export async function discoverLocalPort(config: LocalPortConfig): Promise<{
     status: 'Сервер не обнаружен',
     error: `Порт ${port} на ${cleanHost} недоступен. Проверьте, запущен ли Ollama / LM Studio.`,
   };
+}
+
+/**
+ * Tests mirror proxy latency and connectivity to bypass RU restrictions.
+ */
+export async function testMirrorLatency(customMirrorUrl?: string): Promise<{
+  success: boolean;
+  latencyMs?: number;
+  status: string;
+  error?: string;
+}> {
+  const start = Date.now();
+
+  // If custom mirror URL specified, test it directly
+  if (customMirrorUrl && customMirrorUrl.trim()) {
+    try {
+      const clean = customMirrorUrl.trim().replace(/\/+$/, '');
+      const res = await fetch(`${clean}/v1beta/models`, {
+        signal: AbortSignal.timeout(6000),
+      });
+      const latency = Date.now() - start;
+      return {
+        success: true,
+        latencyMs: latency,
+        status: `Пользовательское зеркало доступно! Пинг: ${latency} мс (HTTP ${res.status})`,
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        status: 'Ошибка подключения к кастомному зеркалу',
+        error: e?.message || 'Кастомный URL зеркала недоступен или блокирует CORS',
+      };
+    }
+  }
+
+  // Try server-side test endpoint
+  try {
+    const res = await fetch('/api/proxy/test-mirror', {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        success: data.success ?? true,
+        latencyMs: data.latencyMs ?? (Date.now() - start),
+        status: data.status || `Облачное зеркало активно! Пинг: ${data.latencyMs || Date.now() - start} мс`,
+        error: data.error,
+      };
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // Fallback direct check
+  try {
+    const directRes = await fetch('https://generativelanguage.googleapis.com', {
+      mode: 'no-cors',
+      signal: AbortSignal.timeout(5000),
+    });
+    const latency = Date.now() - start;
+    return {
+      success: true,
+      latencyMs: latency,
+      status: `Прямое соединение активно (Пинг: ${latency} мс)`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      status: 'Прямое соединение заблокировано в вашем регионе',
+      error: 'Google API недоступен без зеркала/VPN. Рекомендуется включить «Встроенное зеркало».',
+    };
+  }
 }

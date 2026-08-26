@@ -9,6 +9,7 @@ import {
   CustomModelItem,
   ModelCustomConfig,
   DiscoveredModel,
+  AppLanguage,
 } from './types';
 import { PROVIDERS_LIST, PRESET_THEME_COLORS, PRESET_ACCENT_COLORS, PRESET_FONTS } from './data/defaultModels';
 import {
@@ -17,6 +18,10 @@ import {
   getHardwareId,
   hashPassword,
 } from './utils/crypto';
+import {
+  saveToExternalRootStorage,
+  loadFromExternalRootStorage,
+} from './utils/externalStorage';
 import { createSpeechRecognizer } from './utils/speech';
 import { sendChatMessageStream, discoverProviderModels, discoverLocalPort } from './services/apiService';
 
@@ -55,11 +60,21 @@ const DEFAULT_SETTINGS: AppSettings = {
   maxMessagesInContext: 20,
   maxSavedChats: 5,
   copyModelsToAppData: false,
+  saveToExternalStorage: true,
+  networkProxy: {
+    mode: 'mirror',
+    customGoogleMirrorUrl: '',
+    customProxyUrl: '',
+    proxyAllProviders: false,
+  },
   enabledModelIds: [
     'gemini-3.7-flash',
     'gemini-3.1-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
     'gpt-4o-mini',
-    'claude-3-haiku-20240307',
+    'claude-3-5-haiku-20241022',
     'deepseek-chat',
     'llama-3.3-70b-versatile',
     'mistral-small-latest',
@@ -152,6 +167,7 @@ export default function App() {
           setIsWelcomeOpen(true);
         }
 
+        let settingsRestored = false;
         if (rawSettings) {
           let loadedSettings: AppSettings | null = null;
           try {
@@ -171,6 +187,7 @@ export default function App() {
           }
 
           if (loadedSettings) {
+            settingsRestored = true;
             setSettings({
               ...DEFAULT_SETTINGS,
               ...loadedSettings,
@@ -198,6 +215,30 @@ export default function App() {
               addLog('warn', 'Security', 'Обнаружен перенос зашифрованных файлов на другое устройство!');
               setIsTransferAlertOpen(true);
             }
+          }
+        }
+
+        // If local storage was wiped (e.g. after APK update / reinstall), check external persistent storage backup
+        if (!settingsRestored) {
+          try {
+            const extBackup = await loadFromExternalRootStorage();
+            if (extBackup.found && extBackup.settings) {
+              addLog('info', 'Storage', 'Автоматически восстановлены настройки из постоянной памяти CHATOX_Data');
+              setSettings({
+                ...DEFAULT_SETTINGS,
+                ...extBackup.settings,
+                security: { ...DEFAULT_SETTINGS.security, ...(extBackup.settings.security || {}) },
+                customization: { ...DEFAULT_SETTINGS.customization, ...(extBackup.settings.customization || {}) },
+              });
+              if (extBackup.chats && extBackup.chats.length > 0) {
+                setChats(extBackup.chats);
+                setActiveChatId(extBackup.chats[0].id);
+                addLog('info', 'Storage', `Восстановлено диалогов из бэкапа: ${extBackup.chats.length}`);
+              }
+              settingsRestored = true;
+            }
+          } catch (extErr) {
+            console.warn('External backup restore check:', extErr);
           }
         }
 
@@ -286,6 +327,11 @@ export default function App() {
             : stringified;
 
           localStorage.setItem('chatox_settings_enc', encrypted);
+
+          // If external persistent storage is active, mirror backup
+          if (updated.saveToExternalStorage !== false) {
+            saveToExternalRootStorage(updated, chats).catch(() => {});
+          }
         } catch (e) {
           console.error('Error saving settings:', e);
         }
@@ -310,6 +356,11 @@ export default function App() {
         : stringified;
 
       localStorage.setItem('chatox_chats_enc', encrypted);
+
+      // If external persistent storage is active, mirror backup
+      if (settings.saveToExternalStorage !== false) {
+        saveToExternalRootStorage(settings, trimmed).catch(() => {});
+      }
     } catch (e) {
       console.error('Error saving chats:', e);
     }
@@ -393,29 +444,31 @@ export default function App() {
     enabledModels[0] ||
     PROVIDERS_LIST[0].defaultModels[0];
 
-  // First launch name save
-  const handleWelcomeSaveName = (name: string) => {
+  // First launch profile save (Name + Language)
+  const handleWelcomeSaveProfile = (name: string, language: AppLanguage) => {
     updateSettings({
       customization: {
         ...settings.customization,
         userName: name,
+        language: language,
       },
     });
     localStorage.setItem('chatox_initialized', 'true');
     setIsWelcomeOpen(false);
-    addLog('info', 'Auth', `Пользователь идентифицирован: ${name}`);
+    addLog('info', 'Auth', `Пользователь идентифицирован: ${name} [${language.toUpperCase()}]`);
   };
 
-  const handleWelcomeSkip = () => {
+  const handleWelcomeSkip = (language: AppLanguage) => {
     updateSettings({
       customization: {
         ...settings.customization,
         userName: 'Skipped',
+        language: language,
       },
     });
     localStorage.setItem('chatox_initialized', 'true');
     setIsWelcomeOpen(false);
-    addLog('info', 'Auth', 'Пользователь пропустил ввод имени (Skipped)');
+    addLog('info', 'Auth', `Пользователь пропустил ввод имени [${language.toUpperCase()}]`);
   };
 
   // Transfer protection unlock verification
@@ -610,6 +663,7 @@ export default function App() {
       modelConfig: settings.modelConfigs?.[activeModel.id],
       localPortConfig: settings.localPortConfig,
       apiKeys: settings.apiKeys,
+      networkProxy: settings.networkProxy,
       attachments: userMessage.attachments,
       onChunk: (chunk: string) => {
         accumulatedText += chunk;
@@ -800,6 +854,7 @@ export default function App() {
         isDotsMenuOpen={isDotsMenuOpen}
         onToggleDotsMenu={() => setIsDotsMenuOpen(!isDotsMenuOpen)}
         accentColor={settings.customization.accentColor}
+        language={settings.customization.language || 'ru'}
       />
 
       {/* Bottom Message Input Bar */}
@@ -819,6 +874,7 @@ export default function App() {
         useSimpleNames={settings.customization.useSimpleNames}
         accentColor={settings.customization.accentColor}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        language={settings.customization.language || 'ru'}
       />
 
       {/* Slide-out Left Drawer for Saved Chats */}
@@ -834,6 +890,7 @@ export default function App() {
         maxSavedChats={settings.maxSavedChats}
         isEncrypted={settings.security.encryptFiles}
         accentColor={settings.customization.accentColor}
+        language={settings.customization.language || 'ru'}
       />
 
       {/* Settings Modal (Tab 1, Tab 2, Tab 3) */}
@@ -865,6 +922,7 @@ export default function App() {
           config={settings.modelConfigs?.[selectedModelForSettings.id]}
           onSaveConfig={(modelId, cfg) => handleSaveModelConfig(modelId, cfg)}
           accentColor={settings.customization.primaryColor}
+          language={settings.customization.language || 'ru'}
         />
       )}
 
@@ -875,6 +933,7 @@ export default function App() {
         logs={logs}
         onClearLogs={() => setLogs([])}
         accentColor={settings.customization.primaryColor}
+        language={settings.customization.language || 'ru'}
       />
 
       {/* Hugging Face Connector Modal */}
@@ -890,6 +949,7 @@ export default function App() {
           addLog('info', 'HF', `Подключена модель Hugging Face: ${model.name}`);
         }}
         accentColor={settings.customization.primaryColor}
+        language={settings.customization.language || 'ru'}
       />
 
       {/* Local / Custom Model Modal */}
@@ -906,12 +966,13 @@ export default function App() {
         }}
         copyToAppData={settings.copyModelsToAppData}
         accentColor={settings.customization.primaryColor}
+        language={settings.customization.language || 'ru'}
       />
 
       {/* First Launch Welcome Screen */}
       <WelcomeModal
         isOpen={isWelcomeOpen}
-        onSaveName={handleWelcomeSaveName}
+        onSaveProfile={handleWelcomeSaveProfile}
         onSkip={handleWelcomeSkip}
         accentColor={settings.customization.primaryColor}
       />
@@ -925,6 +986,7 @@ export default function App() {
           addLog('info', 'Security', 'Доступ к хранилищу разблокирован');
         }}
         accentColor={settings.customization.primaryColor}
+        language={settings.customization.language || 'ru'}
       />
     </div>
   );
